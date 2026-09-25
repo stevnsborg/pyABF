@@ -6,16 +6,18 @@ operating income (NOI) over the budget period.  Each year's cash flow is
 represented as an ``AnnualCashFlow`` dataclass; the full projection is
 assembled by ``CashFlowProjection``.
 
-The projection follows the structure of the Wiborg + Partnere budget
-(Bilag 1, pp. 27–28):
+The projection follows the structure of the DCF budget used in a typical
+Danish valuarvurdering:
 
     Lejeindtægter (rental income)
       – Boliger, nuværende         (base residential rent)
       – Boliger, moderniserede     (modernized residential rent)
       – Erhverv                    (commercial rent)
-      + Forbedringstillæg          (improvement allowances)
-      + Kapitalafkast              (capital return)
     = Lejeindtægter i alt
+
+    (Forbedringstillæg and kapitalafkast are assumed to be part of the
+    existing rent roll; the corresponding columns are kept for reporting
+    but are always 0 in the projection.)
 
     Driftsudgifter i alt           (operating expenses)
 
@@ -54,8 +56,8 @@ class AnnualCashFlow:
         base_residential_rent: Rent from un-modernized residential units.
         modernized_residential_rent: Rent from modernized residential units.
         commercial_rent: Rent from commercial units.
-        improvement_allowances: Annual improvement-based rent increases.
-        capital_return: Capital return on assessed property value.
+        improvement_allowances: Reserved; always 0 (included in base rent).
+        capital_return: Reserved; always 0 (included in base rent).
         total_rental_income: Sum of all rental income components.
         operating_expenses: Total operating expenses for the year.
         modernization_cost: One-time modernization investment for the year.
@@ -146,7 +148,7 @@ class CashFlowProjection:
 
         # Pre-compute base-year totals (year 0 values, before inflation).
         #
-        # The Wiborg DCF uses an "uplift" model:
+        # The model uses an "uplift" approach:
         #   - The base residential rent (total_base_residential_rent) is the
         #     full rent roll for ALL existing residential tenancies.  This
         #     already includes improvement allowances and capital return as
@@ -211,9 +213,16 @@ class CashFlowProjection:
             # Operating expenses
             op_exp = operating * infl
 
-            # Modernization cost: incurred only during the budget period
-            if year <= n:
-                mod_cost = mod_cost_base * infl
+            # Modernization cost: incurred only during the budget period,
+            # and only for area that has not already been modernized
+            # (relevant when duration_years < evaluation_period).
+            if year <= n and area_per_year > 0:
+                remaining = max(
+                    0.0,
+                    a.modernization.total_area_sqm - area_per_year * (year - 1),
+                )
+                fraction = min(1.0, remaining / area_per_year)
+                mod_cost = mod_cost_base * fraction * infl
             else:
                 mod_cost = 0.0
 

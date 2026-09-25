@@ -7,7 +7,11 @@ notes (noter), each grouping related income or expense line items.
 Contains:
     AccountEntry   — A single accounting note with line items
     AnnualReport   — A full annual report composed of notes
-    DEFAULT_NOTES  — The 10 standard note categories
+    DEFAULT_NOTES  — A common 10-note layout, used when no layout is given
+
+Note layouts differ between administrators, so ``DEFAULT_NOTES`` is only a
+starting point: pass your own ``{note_id: (name, is_expense)}`` mapping to
+:meth:`AnnualReport.from_defaults` to match your cooperative's report.
 """
 
 from __future__ import annotations
@@ -53,7 +57,8 @@ class AccountEntry:
         self.items.pop(item_id, None)
 
 
-# The 10 standard notes in a Danish housing cooperative's annual report
+#: A common 10-note layout for a Danish housing cooperative's annual report,
+#: as ``{note_id: (name, is_expense)}``. Override per cooperative as needed.
 DEFAULT_NOTES: dict[str, tuple[str, bool]] = {
     "01": ("Revenue", False),
     "02": ("Personnel expenses", True),
@@ -75,6 +80,9 @@ class AnnualReport:
     Collects a set of accounting notes for a given fiscal year
     and computes the result (income minus expenses).
 
+    Income and expense notes are both stored as positive amounts; the
+    ``is_expense`` flag on each note decides which side it counts towards.
+
     Attributes:
         year: The fiscal year
         notes: List of accounting notes in the report
@@ -84,20 +92,40 @@ class AnnualReport:
     notes: list[AccountEntry] = field(default_factory=list)
 
     @classmethod
-    def from_defaults(cls, year: int) -> "AnnualReport":
-        """Create an annual report with the 10 default note categories.
+    def from_defaults(
+        cls,
+        year: int,
+        notes: dict[str, tuple[str, bool]] | None = None,
+    ) -> "AnnualReport":
+        """Create an annual report pre-populated with empty notes.
 
         Args:
             year: The fiscal year
+            notes: Note layout as ``{note_id: (name, is_expense)}``.
+                Defaults to :data:`DEFAULT_NOTES`.
 
         Returns:
-            An AnnualReport with empty default notes
+            An AnnualReport with one empty AccountEntry per note
         """
+        layout = DEFAULT_NOTES if notes is None else notes
         entries = [
             AccountEntry(id=nid, name=name, is_expense=is_expense)
-            for nid, (name, is_expense) in DEFAULT_NOTES.items()
+            for nid, (name, is_expense) in layout.items()
         ]
         return cls(year=year, notes=entries)
+
+    def add_note(self, note: AccountEntry) -> None:
+        """Add a note to the report.
+
+        Args:
+            note: The AccountEntry to add
+
+        Raises:
+            ValueError: If a note with the same id already exists
+        """
+        if self.find_note(note.id) is not None:
+            raise ValueError(f"Note '{note.id}' already exists in the report.")
+        self.notes.append(note)
 
     def find_note(self, note_id: str) -> AccountEntry | None:
         """Find a note by its id.

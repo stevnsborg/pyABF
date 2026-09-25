@@ -2,9 +2,15 @@
 loan.py — Mortgage loan modeling for Danish housing cooperatives.
 
 Supports annuity loans with:
-  - Interest-only periods
-  - Contribution rates (bidragssats)
-  - Bond price valuation (market value of remaining debt)
+  - Interest-only periods (afdragsfrihed)
+  - Contribution rates (bidragssats), charged on the outstanding balance
+    together with the interest
+  - Bond price valuation (kursværdi / market value of remaining debt)
+
+The loan is modelled from "now": ``principal`` is the balance at the start
+of the schedule and ``term_years`` / ``interest_only_years`` are the
+*remaining* periods. For an existing loan, pass the current outstanding
+balance and remaining term.
 
 Contains:
     Loan — Class for modeling a mortgage loan
@@ -23,14 +29,21 @@ class Loan:
 
     Attributes:
         name: Descriptive name for the loan (e.g. 'Loan 15')
-        loan_type: Type of loan (e.g. 'fixed', 'variable')
-        principal: The original loan amount (DKK)
+        loan_type: Free-text label (e.g. 'fixed', 'variable'). Informational
+            only; it does not change the calculation.
+        principal: Outstanding balance at the start of the schedule (DKK)
         interest_rate: Annual nominal interest rate (e.g. 0.015 = 1.5%)
         contribution_rate: Annual contribution rate to the mortgage lender (e.g. 0.004)
-        term_years: Total term in years
-        interest_only_years: Number of interest-only years (default 0)
+        term_years: Remaining term in years (may be fractional, e.g. 24.25)
+        interest_only_years: Number of interest-only years at the start of
+            the schedule (default 0). Equal to ``term_years`` for a loan
+            that is interest-only for its whole life.
         payments_per_year: Number of payment periods per year (default 4 = quarterly)
         bond_price: Bond price in percent (e.g. 80.0 = price of 80)
+
+    Note:
+        The ``interest`` column of :meth:`payment_schedule` includes the
+        contribution (bidrag), since both are charged on the balance.
     """
 
     name: str
@@ -42,6 +55,14 @@ class Loan:
     interest_only_years: float = 0.0
     payments_per_year: int = 4
     bond_price: float = 100.0
+
+    def __post_init__(self) -> None:
+        if self.payments_per_year <= 0:
+            raise ValueError("payments_per_year must be positive.")
+        if self.term_years < 0 or self.interest_only_years < 0:
+            raise ValueError("term_years and interest_only_years must be >= 0.")
+        if self.interest_only_years > self.term_years:
+            raise ValueError("interest_only_years cannot exceed term_years.")
 
     @property
     def effective_period_rate(self) -> float:
@@ -60,7 +81,7 @@ class Loan:
 
     @property
     def market_value(self) -> float:
-        """Market value of the full principal based on the bond price."""
+        """Market value (kursværdi) of the current principal at ``bond_price``."""
         return self.principal * self.bond_price / 100
 
     @staticmethod
@@ -79,26 +100,34 @@ class Loan:
             return amount / periods if periods > 0 else 0.0
         return amount * (rate * (1 + rate) ** periods) / ((1 + rate) ** periods - 1)
 
-    def _compute_principal_payment(self, balance: float) -> float:
-        """Compute the principal payment per period for the amortizing phase.
+    @property
+    def amortizing_periods(self) -> int:
+        """Number of periods in the amortizing (annuity) phase."""
+        return max(0, self.total_periods - self.interest_only_periods)
 
-        Args:
-            balance: The current outstanding balance
+    @property
+    def annuity_payment(self) -> float:
+        """Fixed payment per period (ydelse) during the amortizing phase.
 
-        Returns:
-            Principal payment per period (DKK)
+        Includes interest, contribution and principal.  Since the balance
+        is unchanged during the interest-only phase, the annuity is
+        computed on the full principal.  Returns 0.0 for a loan that is
+        interest-only for its whole term.
         """
-        amortizing_years = self.term_years - self.interest_only_years
-        amortizing_periods = round(amortizing_years * self.payments_per_year)
-        if amortizing_periods <= 0:
+        if self.amortizing_periods == 0:
             return 0.0
-        annuity = self._compute_annuity_payment(
-            balance, self.effective_period_rate, amortizing_periods
+        return self._compute_annuity_payment(
+            self.principal, self.effective_period_rate, self.amortizing_periods
         )
-        return annuity - (balance * self.effective_period_rate)
 
     def payment_schedule(self) -> pd.DataFrame:
         """Generate a detailed payment schedule for the full loan term.
+
+        During the interest-only phase only interest (incl. contribution) is
+        paid.  Afterwards the loan is repaid as an annuity: the total
+        payment is constant (``annuity_payment``) and the principal part
+        grows as the interest part shrinks, so the balance reaches zero at
+        the end of the term.
 
         Returns:
             DataFrame with columns:
@@ -106,7 +135,7 @@ class Loan:
                 total_payment, closing_balance, bond_price, market_value
         """
         balance = self.principal
-        principal_pmt = self._compute_principal_payment(balance)
+        annuity = self.annuity_payment
         rate = self.effective_period_rate
 
         schedule = []
@@ -119,7 +148,11 @@ class Loan:
                 period_principal = 0.0
                 total_payment = interest
             else:
-                period_principal = min(principal_pmt, balance)
+                # Last period clears any rounding residue
+                if period == self.total_periods:
+                    period_principal = balance
+                else:
+                    period_principal = min(annuity - interest, balance)
                 total_payment = interest + period_principal
 
             balance -= period_principal
@@ -141,6 +174,31 @@ class Loan:
 
         return pd.DataFrame(schedule)
 
+    def annual_schedule(self) -> pd.DataFrame:
+        """Payment schedule aggregated per year.
+
+        Year 1 covers periods 1..payments_per_year, and so on. A final
+        partial year (fractional ``term_years``) is included as its own row.
+
+        Returns:
+            DataFrame with columns:
+                loan, year, interest, principal_payment, total_payment,
+                closing_balance, market_value
+        """
+        schedule = self.payment_schedule()
+        if schedule.empty:
+            return schedule
+        schedule["year"] = (schedule["period"] - 1) // self.payments_per_year + 1
+        annual = schedule.groupby("year", as_index=False).agg(
+            interest=("interest", "sum"),
+            principal_payment=("principal_payment", "sum"),
+            total_payment=("total_payment", "sum"),
+            closing_balance=("closing_balance", "last"),
+            market_value=("market_value", "last"),
+        )
+        annual.insert(0, "loan", self.name)
+        return annual
+
     def balance_after_years(self, years: int) -> float:
         """Remaining balance after a given number of years.
 
@@ -151,8 +209,10 @@ class Loan:
             Remaining balance in DKK
 
         Raises:
-            ValueError: If years is outside the loan term
+            ValueError: If years is negative or outside the loan term
         """
+        if years < 0:
+            raise ValueError("years must be >= 0.")
         if years == 0:
             return self.principal
 
@@ -176,7 +236,7 @@ class Loan:
         return self.balance_after_years(years) * self.bond_price / 100
 
     def total_interest(self) -> float:
-        """Total interest paid over the full loan term."""
+        """Total interest (including contribution) paid over the full loan term."""
         return float(self.payment_schedule()["interest"].sum())
 
     def total_payments(self) -> float:

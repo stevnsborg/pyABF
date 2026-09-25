@@ -13,6 +13,17 @@ Contains:
     AccountMapping     — Maps bookkeeping account numbers to budget lines
     BalanceSheetRow    — One row from an imported balance/trial-balance CSV
     BudgetTracker      — Compares budget vs. actuals and suggests next year
+
+Helper functions:
+    parse_danish_number     — Parse '1.234,56' style numbers
+    load_balance_sheet_csv  — Read a trial-balance CSV export
+
+Sign convention:
+    Amounts follow the bookkeeping convention used in most Danish
+    trial-balance exports: expenses are positive and income is negative.
+    Budget line items should be entered the same way (e.g. rent income
+    as ``budgeted=-4_385_000``) so that actuals from the balance sheet
+    can be compared directly.
 """
 
 from __future__ import annotations
@@ -82,18 +93,22 @@ class BudgetCategory:
     items: dict[str, BudgetLineItem] = field(default_factory=dict)
 
     def add_item(self, item: BudgetLineItem) -> None:
+        """Add (or replace) a line item, keyed by ``item.key``."""
         self.items[item.key] = item
 
     @property
     def total_budgeted(self) -> float:
+        """Sum of budgeted amounts for all items in the category."""
         return sum(i.budgeted for i in self.items.values())
 
     @property
     def total_actual(self) -> float:
+        """Sum of actual amounts for all items in the category."""
         return sum(i.actual for i in self.items.values())
 
     @property
     def total_variance(self) -> float:
+        """Actual minus budgeted for the whole category."""
         return self.total_actual - self.total_budgeted
 
 
@@ -105,7 +120,8 @@ class Budget:
         fiscal_year: Label for the fiscal year (e.g. '2025/2026')
         categories: Ordered dict of categories keyed by their ``key``
         rent_amount: Current annual total rent collected from cooperative
-                     units (boligafgift). Used by the suggestion engine.
+                     units (boligafgift), as a positive number. Used by the
+                     suggestion engine to size a rent increase.
         mortgage_principal: Annual mortgage principal repayment (afdrag).
                            Not an operating cost but affects liquidity.
         depreciation: Annual depreciation (afskrivninger).
@@ -120,10 +136,11 @@ class Budget:
     # -- helpers -------------------------------------------------------------
 
     def add_category(self, cat: BudgetCategory) -> None:
+        """Add (or replace) a category, keyed by ``cat.key``."""
         self.categories[cat.key] = cat
 
     def find_item(self, item_key: str) -> BudgetLineItem | None:
-        """Find a line item across all categories."""
+        """Find a line item by key across all categories (None if absent)."""
         for cat in self.categories.values():
             if item_key in cat.items:
                 return cat.items[item_key]
@@ -133,6 +150,7 @@ class Budget:
 
     @property
     def total_income_budgeted(self) -> float:
+        """Budgeted income (negative under the accounting sign convention)."""
         return sum(
             c.total_budgeted
             for c in self.categories.values()
@@ -141,6 +159,7 @@ class Budget:
 
     @property
     def total_income_actual(self) -> float:
+        """Actual income (negative under the accounting sign convention)."""
         return sum(
             c.total_actual
             for c in self.categories.values()
@@ -149,6 +168,7 @@ class Budget:
 
     @property
     def total_expense_budgeted(self) -> float:
+        """Budgeted expenses (positive)."""
         return sum(
             c.total_budgeted
             for c in self.categories.values()
@@ -157,6 +177,7 @@ class Budget:
 
     @property
     def total_expense_actual(self) -> float:
+        """Actual expenses (positive)."""
         return sum(
             c.total_actual
             for c in self.categories.values()
@@ -171,6 +192,7 @@ class Budget:
 
     @property
     def operating_result_actual(self) -> float:
+        """Actual operating result (income - expenses). Positive = surplus."""
         return -(self.total_income_actual + self.total_expense_actual)
 
     @property
@@ -196,15 +218,22 @@ class AccountMapping:
     tracker which budget line each account number belongs to.
 
     Attributes:
-        account_to_item: Dict mapping account number (str) → budget item key
-        unmapped_category: Category key for accounts that don't match any
-                          mapping.  Set to None to silently ignore them.
+        account_to_item: Dict mapping account number (str) → budget item key.
+            Several accounts may map to the same item; their balances are
+            summed.
+        unmapped_category: Key of a budget category that should collect
+            accounts which don't match any mapping.  Each such account is
+            added to that category as its own line item (key
+            ``"account:<number>"``, named after the account description).
+            When None (the default), unmapped accounts are only reported
+            in the return value of ``BudgetTracker.update_actuals``.
     """
 
     account_to_item: dict[str, str] = field(default_factory=dict)
     unmapped_category: str | None = None
 
     def add(self, account_number: str, item_key: str) -> None:
+        """Map one account number to a budget item key."""
         self.account_to_item[account_number] = item_key
 
     def add_many(self, mappings: dict[str, str]) -> None:
@@ -251,7 +280,8 @@ def parse_danish_number(value: str) -> float:
         value: A string with Danish number formatting.
 
     Returns:
-        The parsed float value.
+        The parsed float value.  Empty or unparseable strings return 0.0
+        (balance exports often leave cells blank for zero).
     """
     if not value or not value.strip():
         return 0.0
@@ -280,7 +310,7 @@ def load_balance_sheet_csv(
 ) -> list[BalanceSheetRow]:
     """Load a balance sheet from a CSV file.
 
-    The default column indices match the administrator export format:
+    The default column indices match a common administrator export format:
         Col 0: Fin.  (company id)
         Col 1: Konto (account number)
         Col 2: Tekst (description)
@@ -373,15 +403,22 @@ class BudgetTracker:
     def update_actuals(self, rows: list[BalanceSheetRow]) -> dict[str, float]:
         """Update actual amounts on budget line items from balance rows.
 
-        Each row's YTD balance is added to the budget line item that its
-        account number maps to.  Accounts that appear in multiple rows
-        with the same item key are summed.
+        All actuals are first reset to zero.  Each row's YTD balance is
+        then added to the budget line item that its account number maps
+        to.  Accounts that appear in multiple rows with the same item key
+        are summed.
+
+        If ``mapping.unmapped_category`` names an existing category, each
+        unmapped account with a non-zero balance is added to it as a line
+        item (see :class:`AccountMapping`).
 
         Args:
             rows: Parsed balance sheet rows.
 
         Returns:
             Dict of unmapped account numbers and their YTD balances.
+            This includes accounts mapped to an item key that doesn't
+            exist in the budget.
         """
         self.balance_rows = rows
 
@@ -390,18 +427,36 @@ class BudgetTracker:
             for item in cat.items.values():
                 item.actual = 0.0
 
+        catch_all = (
+            self.budget.categories.get(self.mapping.unmapped_category)
+            if self.mapping.unmapped_category is not None
+            else None
+        )
+
         unmapped: dict[str, float] = {}
         for row in rows:
             item_key = self.mapping.lookup(row.account_number)
-            if item_key is None:
-                if row.ytd_balance != 0.0:
-                    unmapped[row.account_number] = row.ytd_balance
+            budget_item = (
+                self.budget.find_item(item_key) if item_key is not None else None
+            )
+            if budget_item is not None:
+                budget_item.actual += row.ytd_balance
                 continue
-            budget_item = self.budget.find_item(item_key)
-            if budget_item is None:
-                unmapped[row.account_number] = row.ytd_balance
+
+            # Unmapped account (or mapped to a non-existent item)
+            if item_key is None and row.ytd_balance == 0.0:
                 continue
-            budget_item.actual += row.ytd_balance
+            unmapped[row.account_number] = (
+                unmapped.get(row.account_number, 0.0) + row.ytd_balance
+            )
+            if catch_all is not None:
+                key = f"account:{row.account_number}"
+                if key not in catch_all.items:
+                    catch_all.add_item(BudgetLineItem(
+                        key=key,
+                        name=row.description or row.account_number,
+                    ))
+                catch_all.items[key].actual += row.ytd_balance
 
         return unmapped
 
@@ -456,6 +511,10 @@ class BudgetTracker:
         max_rent_increase_pct: float = 0.05,
         prior_year_actuals: dict[str, float] | None = None,
         overrides: dict[str, float] | None = None,
+        current_year_weight: float = 0.6,
+        rounding: int = 500,
+        rent_rounding: int = 1000,
+        min_rent_increase_pct: float = 0.005,
     ) -> Budget:
         """Suggest a budget for the next fiscal year.
 
@@ -463,17 +522,23 @@ class BudgetTracker:
           1. For each expense line, take the higher of (a) this year's
              budget and (b) the extrapolated actual, then apply inflation.
           2. For income lines, carry forward the current budget.
-          3. If the suggested expenses exceed income, compute the rent
-             increase needed and cap it at ``max_rent_increase_pct``.
-          4. Rent (boligafgift) is never decreased unless explicitly
-             overridden.
+          3. Round every line to the nearest ``rounding``.
+          4. If the resulting liquidity result is a deficit, compute the
+             rent increase needed and cap it at ``max_rent_increase_pct``.
+             Increases below ``min_rent_increase_pct`` are not suggested.
+          5. Rent (boligafgift) is never decreased.
+
+        The suggested rent is returned in ``Budget.rent_amount`` only; the
+        income line items are *not* adjusted, so the returned budget's
+        operating result shows the result before any rent increase.
 
         When ``prior_year_actuals`` is given (item_key → actual amount),
-        the engine uses a 2-year weighted average (60 % current, 40 %
-        prior) for smoother projections.
+        the engine blends the extrapolated current-year actual with the
+        prior-year actual using ``current_year_weight`` (default 60 %
+        current, 40 % prior) for smoother projections.
 
         Any entry in ``overrides`` replaces the computed suggestion for
-        that item key.
+        that item key (it is still rounded).
 
         Args:
             months_elapsed: Months elapsed in the current fiscal year
@@ -483,6 +548,13 @@ class BudgetTracker:
                                    fraction (e.g. 0.05 = 5 %).
             prior_year_actuals: Optional prior-year actuals for smoothing.
             overrides: Dict of item_key → forced budgeted amount.
+            current_year_weight: Weight of the current year when blending
+                with ``prior_year_actuals`` (0–1).
+            rounding: Round each suggested line to this multiple (DKK).
+                Use 0 or 1 to disable.
+            rent_rounding: Round the suggested rent to this multiple (DKK).
+            min_rent_increase_pct: Smallest rent increase worth suggesting
+                as a fraction (e.g. 0.005 = 0.5 %).
 
         Returns:
             A new Budget object with suggested amounts for next year.
@@ -516,7 +588,10 @@ class BudgetTracker:
                     )
                     # Blend with prior year if available
                     if item.key in prior:
-                        blended = 0.6 * extrapolated + 0.4 * prior[item.key]
+                        blended = (
+                            current_year_weight * extrapolated
+                            + (1 - current_year_weight) * prior[item.key]
+                        )
                     else:
                         blended = extrapolated
 
@@ -531,8 +606,8 @@ class BudgetTracker:
                     # Apply inflation
                     suggested *= 1 + inflation_rate
 
-                # Round to nearest 500 for cleaner budget numbers
-                suggested = _round_to(suggested, 500)
+                # Round for cleaner budget numbers
+                suggested = _round_to(suggested, rounding)
 
                 new_cat.add_item(BudgetLineItem(
                     key=item.key,
@@ -543,18 +618,16 @@ class BudgetTracker:
 
         # --- Rent adjustment suggestion ---
         new_budget.rent_amount = self.budget.rent_amount
-        deficit = -(
-            new_budget.operating_result_budgeted
-            - new_budget.mortgage_principal
-            - new_budget.depreciation
-        )
+        deficit = -new_budget.liquidity_result_budgeted
 
         if deficit > 0 and new_budget.rent_amount > 0:
             increase_needed = deficit / new_budget.rent_amount
             capped_increase = min(increase_needed, max_rent_increase_pct)
-            if capped_increase > 0.005:  # Only suggest if > 0.5 %
+            if capped_increase > min_rent_increase_pct:
                 new_budget.rent_amount *= 1 + capped_increase
-                new_budget.rent_amount = _round_to(new_budget.rent_amount, 1000)
+                new_budget.rent_amount = _round_to(
+                    new_budget.rent_amount, rent_rounding
+                )
 
         return new_budget
 
@@ -564,8 +637,9 @@ class BudgetTracker:
         """Generate a list of variance records for all budget items.
 
         Returns:
-            List of dicts with keys: category, item, budgeted, actual,
-            variance, utilisation_pct.
+            List of dicts with keys: category, item, key, budgeted,
+            actual, variance, utilisation_pct.  Pass the result to
+            ``pandas.DataFrame`` for a tabular view.
         """
         rows = []
         for cat in self.budget.categories.values():

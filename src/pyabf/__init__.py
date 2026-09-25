@@ -2,19 +2,23 @@
 pyABF — Tools for computing and modeling the finances
 of Danish housing cooperatives (andelsboligforeninger).
 
+Everything is generic: property-specific data (units, loans, account
+mappings, valuation assumptions) is supplied by the caller, so the same
+package works for any andelsboligforening.
+
 Modules:
-    units       — CooperativeUnit, CommercialUnit, Improvement
+    units       — Unit, CooperativeUnit, CommercialUnit, Improvement
     loan        — Loan (mortgage loans and payment schedules)
     accounting  — AccountEntry, AnnualReport
     valuation   — DCF property valuation (subpackage)
-    tax         — Property tax computation (2024+ rules)
+    tax         — Property tax (grundskyld) computation (2024+ rules)
     budget      — Budget tracking and balance-sheet import
     cooperative — HousingCooperative (the main class)
 """
 
 from .units import Unit, CooperativeUnit, CommercialUnit, Improvement
 from .loan import Loan
-from .accounting import AccountEntry, AnnualReport
+from .accounting import AccountEntry, AnnualReport, DEFAULT_NOTES
 from .valuation import (
     PropertyDescription,
     RentAssumptions,
@@ -27,6 +31,8 @@ from .valuation import (
     DCFModel,
     ValuationResult,
     ValuationReport,
+    CashFlowProjection,
+    SensitivityGrid,
     run_sensitivity,
 )
 from .tax import compute_property_tax
@@ -58,6 +64,7 @@ __all__ = [
     # Accounting
     "AccountEntry",
     "AnnualReport",
+    "DEFAULT_NOTES",
     # Valuation
     "PropertyDescription",
     "RentAssumptions",
@@ -70,6 +77,8 @@ __all__ = [
     "DCFModel",
     "ValuationResult",
     "ValuationReport",
+    "CashFlowProjection",
+    "SensitivityGrid",
     "run_sensitivity",
     # Tax
     "compute_property_tax",

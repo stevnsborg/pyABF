@@ -1,8 +1,25 @@
 """
-tax.py — Property tax computation for Danish housing cooperatives.
+tax.py — Property tax (grundskyld) computation for Danish housing cooperatives.
 
-From 2024, new rules apply for land tax (grundskyld): the annual
-increase is capped at 4.75% of the new assessment (2.8% in the first year).
+From 2024, new rules apply for land tax (grundskyld): the tax moves from
+its old level towards a new target level (based on the new public
+assessment) with a capped annual increase.
+
+The model implemented here:
+
+    tax(first_year)  = old_tax × (1 + first_year_increase_rate)
+    target_tax       = new_property_value × tax_rate × (1 − target_discount)
+    annual_increase  = target_tax × max_annual_increase_rate
+    tax(year)        = min(target_tax,
+                           tax(first_year) + annual_increase × (year − first_year))
+
+i.e. the tax rises by at most ``annual_increase`` per year until it reaches
+the target, after which it stays flat. If the first-year tax already
+exceeds the target it is held at the first-year level.
+
+The default rule parameters (2.8 %, 4.75 %, 20 % discount, first year 2024)
+are exposed as keyword arguments so they can be adjusted if the rules or
+your municipality's transition scheme differ.
 
 Source: https://www.vurderingsportalen.dk/erhverv/andelsbolig/beskatning/eksempler-grundskyld
 
@@ -12,7 +29,14 @@ Contains:
 
 from __future__ import annotations
 
-import math
+#: First year the new rules apply.
+FIRST_TAX_YEAR = 2024
+#: Increase applied to the old tax level in the first year (2.8 %).
+FIRST_YEAR_INCREASE_RATE = 0.028
+#: Maximum yearly increase as a fraction of the target tax (4.75 %).
+MAX_ANNUAL_INCREASE_RATE = 0.0475
+#: Discount on the new assessment in the transition scheme (20 %).
+TARGET_DISCOUNT = 0.20
 
 
 def compute_property_tax(
@@ -20,18 +44,29 @@ def compute_property_tax(
     old_property_value: float,
     tax_rate: float,
     tax_year: int,
+    *,
+    first_tax_year: int = FIRST_TAX_YEAR,
+    first_year_increase_rate: float = FIRST_YEAR_INCREASE_RATE,
+    max_annual_increase_rate: float = MAX_ANNUAL_INCREASE_RATE,
+    target_discount: float = TARGET_DISCOUNT,
 ) -> tuple[float, float]:
-    """Compute property tax for a housing cooperative (2024 onwards).
-
-    The new rules (from 2024) cap the annual increase in land tax:
-      - 2024: Increase of 2.8% of the old property value
-      - 2025+: Max 4.75% increase per year until the new tax level is reached
+    """Compute property tax (grundskyld) for a housing cooperative.
 
     Args:
-        new_property_value: The new official property assessment (DKK)
-        old_property_value: The old property assessment (DKK)
-        tax_rate: The land tax rate (e.g. 0.026)
-        tax_year: The year to compute tax for (>= 2024)
+        new_property_value: The new official land assessment (DKK).
+        old_property_value: The old tax level the transition starts from
+            (DKK). Note that this is used directly as the pre-reform
+            annual *tax amount*: the first-year tax is
+            ``old_property_value × (1 + first_year_increase_rate)``.
+        tax_rate: The municipal land tax rate as a fraction
+            (e.g. 0.026 for 26 ‰).
+        tax_year: The year to compute tax for (>= ``first_tax_year``).
+        first_tax_year: First year the new rules apply (default 2024).
+        first_year_increase_rate: Increase in the first year (default 2.8 %).
+        max_annual_increase_rate: Maximum yearly increase as a fraction of
+            the target tax (default 4.75 %).
+        target_discount: Discount applied to the new assessment when
+            computing the target tax (default 20 %).
 
     Returns:
         Tuple of:
@@ -39,38 +74,27 @@ def compute_property_tax(
             increase: The year's increase in tax (DKK)
 
     Raises:
-        ValueError: If tax_year < 2024
+        ValueError: If ``tax_year`` is before ``first_tax_year``.
     """
-    if tax_year < 2024:
-        raise ValueError("This model only applies from 2024 onwards.")
+    if tax_year < first_tax_year:
+        raise ValueError(f"This model only applies from {first_tax_year} onwards.")
 
-    # First year increase (2.8% of old value)
-    increase_2024 = old_property_value * 0.028
-    tax_2024 = old_property_value + increase_2024
+    # First year: fixed increase on the old level
+    first_increase = old_property_value * first_year_increase_rate
+    first_tax = old_property_value + first_increase
 
-    # Target tax (80% discount in the transition scheme)
-    target_tax = new_property_value * tax_rate * 0.8
+    # Target tax after the transition
+    target_tax = new_property_value * tax_rate * (1 - target_discount)
+    annual_increase = target_tax * max_annual_increase_rate
 
-    # Number of years to reach target tax
-    if target_tax * 0.0475 > 0:
-        terminal_year = int(math.floor(
-            (target_tax - tax_2024) / (target_tax * 0.0475)
-        ))
-    else:
-        terminal_year = 0
+    years_since_start = tax_year - first_tax_year
+    if years_since_start == 0:
+        return first_tax, first_increase
 
-    if tax_year == 2024:
-        return tax_2024, increase_2024
+    def _tax_after(years: int) -> float:
+        # Capped linear increase from first_tax, never exceeding the target.
+        # If the first-year tax is already above target it is kept flat.
+        return max(first_tax, min(target_tax, first_tax + annual_increase * years))
 
-    elif tax_year < 2024 + terminal_year:
-        annual_increase = target_tax * 0.0475
-        tax = tax_2024 + annual_increase * (tax_year - 2024)
-        return tax, annual_increase
-
-    elif tax_year == 2024 + terminal_year:
-        remaining_increase = target_tax - target_tax * 0.0475 * terminal_year
-        return target_tax, remaining_increase
-
-    else:
-        # Target tax reached — no further increase
-        return target_tax, 0.0
+    tax = _tax_after(years_since_start)
+    return tax, tax - _tax_after(years_since_start - 1)

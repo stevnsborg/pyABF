@@ -12,8 +12,9 @@ The **terminal value** uses the Gordon Growth Model:
 where yield = discount_rate and growth = inflation_rate, so
     TV = NOI_terminal / required_real_return
 
-The terminal value is then discounted back to present value using the
-same nominal discount rate.
+``NOI_terminal`` is the fully-modernized, stabilised NOI in year-n prices
+(no modernization or construction costs).  The terminal value is then
+discounted back from year n using the same nominal discount rate.
 
 Contains:
     ValuationResult  — Immutable container for the computed valuation
@@ -47,7 +48,8 @@ class ValuationResult:
         total_value_per_sqm: Total value divided by total building area.
         discount_factors: Array of discount factors for years 1..n.
         pv_cash_flows: Array of discounted cash flows for years 1..n.
-        terminal_noi: The stabilised NOI used for the terminal value.
+        terminal_noi: The stabilised NOI (in year-n prices) used for the
+            terminal value.
         stabilised_yield: The cap rate used for the terminal value
             (required_real_return).
         projection: The underlying ``CashFlowProjection``.
@@ -94,7 +96,7 @@ class DCFModel:
 
     Example:
         >>> from pyabf.valuation import ValuationAssumptions, DCFModel
-        >>> model = DCFModel(ValuationAssumptions())
+        >>> model = DCFModel(assumptions)  # a populated ValuationAssumptions
         >>> result = model.compute()
         >>> print(f"Value: {result.total_value_rounded:,.0f} DKK")
 

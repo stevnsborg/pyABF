@@ -81,9 +81,9 @@ class RentAssumptions:
        units.
 
     Attributes:
-        base_rent_per_sqm: Current average residential rent (DKK/m²/year).
-            From the Wiborg report this is the weighted average across
-            all residential tenancies.
+        base_rent_per_sqm: Current average residential rent (DKK/m²/year),
+            typically the weighted average across all residential
+            tenancies as stated in the valuation report.
         modernized_rent_per_sqm: Rent per m² after §19.2 modernization
             (DKK/m²/year).  This is the *total* rent for a modernized
             unit, not the *increase*.
@@ -92,8 +92,15 @@ class RentAssumptions:
             from all existing tenancies (DKK).  This is used directly
             rather than computed from base_rent_per_sqm × area, because
             the actual rent roll may include tenancies at different rates
-            (e.g. converted commercial units already at 1,700 DKK/m²).
+            (e.g. units that are already modernized).
         total_commercial_rent: Total annual commercial rent (DKK).
+
+    Note:
+        The cash-flow model uses ``total_base_residential_rent`` and
+        ``total_commercial_rent`` for income; ``commercial_rent_per_sqm``
+        is informational (shown in reports).  ``base_rent_per_sqm`` and
+        ``modernized_rent_per_sqm`` together define the rent *uplift*
+        per modernized m².
     """
 
     base_rent_per_sqm: float = 0.0           # gennemsnitlig leje pr. m²
@@ -114,8 +121,8 @@ class ModernizationPlan:
     When a tenant vacates, the cooperative can carry out a comprehensive
     modernization (gennemgribende modernisering) and subsequently charge
     the higher §19.2 rent.  The model assumes a linear schedule: the
-    same number of square meters are modernized each year over the
-    budget period.
+    same number of square meters are modernized each year until the
+    full ``total_area_sqm`` has been modernized.
 
     Attributes:
         total_area_sqm: Total residential area to be modernized (m²).
@@ -123,7 +130,10 @@ class ModernizationPlan:
         cost_per_sqm: One-time modernization cost per m² (DKK/m²).
             Covers renovation of kitchens, bathrooms, surfaces, etc.
         duration_years: Number of years over which modernization is
-            phased.  Usually equals the budget period (15 years).
+            phased.  Usually equals the budget period (15 years).  If it is
+            shorter, modernization costs stop once the area is done; if
+            longer, the remaining area is treated as modernized in the
+            terminal year.
         vacancy_rate: Assumed fraction of units vacating per year.
             Determines the area modernized each year.  When set to 0
             the model falls back to total_area / duration_years.
@@ -167,9 +177,11 @@ class OperatingCostAssumptions:
     The total is the sum of all individual cost lines.  These are the
     *base-year* amounts; the model inflates them year by year.
 
-    The breakdown mirrors the line items in the Wiborg budget (Bilag 1).
-    For a quick scenario analysis you can just set ``total_operating_cost``
-    directly; the individual lines are informational / audit support.
+    The breakdown mirrors the line items typically found in the budget
+    appendix of a valuation report.  For a quick scenario analysis you can
+    just set ``total_operating_cost`` directly; the individual lines are
+    then informational / audit support.  Lines that don't fit a named
+    field can be supplied in ``other``.
 
     Attributes:
         property_tax: Grundskyld (land tax).
@@ -185,9 +197,10 @@ class OperatingCostAssumptions:
         exterior_maintenance_per_sqm: Løbende udvendig vedligeholdelse (DKK/m²).
         interior_maintenance_per_sqm: Løbende indvendig vedligeholdelse (DKK/m²).
         heating_accounts: Varme- & vandregnskab.
+        other: Additional fixed cost lines as ``{name: amount}`` (DKK).
         total_operating_cost: Total annual operating cost (DKK).
-            If set, this overrides the sum of the individual lines.
-            If 0.0 or None, the total is computed from the breakdown.
+            If set (not None), this overrides the sum of the individual
+            lines.  If None, the total is computed from the breakdown.
     """
 
     property_tax: float = 0.0
@@ -203,6 +216,7 @@ class OperatingCostAssumptions:
     exterior_maintenance_per_sqm: float = 0.0
     interior_maintenance_per_sqm: float = 0.0
     heating_accounts: float = 0.0
+    other: dict[str, float] = field(default_factory=dict)
     total_operating_cost: float | None = None
 
     def compute_total(self, property: PropertyDescription) -> float:
@@ -233,6 +247,7 @@ class OperatingCostAssumptions:
             + self.caretaker
             + self.administration
             + self.heating_accounts
+            + sum(self.other.values())
         )
         return fixed + area_based
 
@@ -248,6 +263,11 @@ class CapitalReturnAssumptions:
     Under Danish rules, part of the rent covers a capital return to
     the property owner.  This is based on the 15th general assessment
     (15. alm. vurdering) and a percentage of the assessed value.
+
+    Note:
+        These values are informational.  The capital return is assumed to
+        be part of ``RentAssumptions.total_base_residential_rent`` and is
+        not added separately in the cash-flow projection.
 
     Attributes:
         assessment_per_sqm: 15th general assessment per m² (DKK/m²).
@@ -275,6 +295,11 @@ class ImprovementAllowance:
 
     The annual rent increase from an improvement is:
         cost × improvement_fraction × yield_rate
+
+    Note:
+        Like the capital return, improvement allowances are assumed to be
+        included in the base rent roll.  They are listed in reports for
+        documentation but are not added separately in the projection.
 
     Attributes:
         name: Description of the improvement.
@@ -312,11 +337,10 @@ class EconomicAssumptions:
     These drive the discounting and the terminal value calculation.
 
     Attributes:
-        inflation_rate: Annual inflation rate.
-            The ECB targets 2%; the Wiborg report uses 2%.
-        required_real_return: Required real return above inflation.
-            Set by the valuar based on market conditions, property risk,
-            and alternative investments.  3.25% in the Wiborg report.
+        inflation_rate: Annual inflation rate (default 2 %, the ECB target).
+        required_real_return: Required real return above inflation
+            (afkastkrav).  Set by the valuar based on market conditions,
+            property risk, and alternative investments (default 3.25 %).
         evaluation_period: Number of years in the DCF budget period.
             After this period the property is assumed to be fully
             modernized and the cash flow stabilises.  15 years is standard.
@@ -330,20 +354,20 @@ class EconomicAssumptions:
     def discount_rate(self) -> float:
         """Nominal discount rate (inflation + real return).
 
-        In the Wiborg report: 2% + 3.25% = 5.25%.
+        E.g. 2 % + 3.25 % = 5.25 %.
         """
         return self.inflation_rate + self.required_real_return
 
     @property
     def stabilised_yield(self) -> float:
-        """Stabilised yield used for the terminal value (= discount_rate).
+        """Stabilised yield (cap rate) used for the terminal value.
 
-        After the budget period, the property is assumed to generate
-        a constant real cash flow growing at the inflation rate.
-        The capitalisation rate for the Gordon Growth model equals
-        the nominal discount rate.
+        After the budget period, the property is assumed to generate a
+        cash flow growing at the inflation rate.  In the Gordon Growth
+        model the cap rate is ``discount_rate − inflation_rate``, i.e.
+        the required real return.  This matches ``DCFModel``.
         """
-        return self.discount_rate
+        return self.discount_rate - self.inflation_rate
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +383,10 @@ class ValuationAssumptions:
     from these inputs.
 
     Example:
-        >>> from pyabf.valuation import ValuationAssumptions, DCFModel
+        >>> from pyabf.valuation import (
+        ...     ValuationAssumptions, PropertyDescription, RentAssumptions,
+        ...     DCFModel,
+        ... )
         >>> assumptions = ValuationAssumptions(
         ...     property_desc=PropertyDescription(total_building_area=5000, ...),
         ...     rent=RentAssumptions(base_rent_per_sqm=800, ...),

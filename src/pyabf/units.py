@@ -11,7 +11,6 @@ Contains:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Literal
 
 
@@ -23,6 +22,10 @@ class Unit:
     set at the cooperative level and scaled by the unit's area.
     Rental units can override this with a fixed rent.
 
+    A unit on its own has a rate of 0; the rate is assigned when the unit
+    is added to a :class:`~pyabf.cooperative.HousingCooperative` (or when
+    the cooperative's rates change).
+
     Attributes:
         address: Street address of the unit
         area: Floor area in m²
@@ -31,7 +34,8 @@ class Unit:
         is_rental: True if the unit is rented out, False if owner-occupied
         fixed_rent: Fixed annual rent for rental units (DKK). If set (> 0)
             this overrides the rate-based calculation for rental units.
-        _rate_per_sqm: Internal field set by the cooperative. Do not set directly.
+        rate_per_sqm: Annual rate (DKK/m²/year) assigned by the owning
+            cooperative. Read-only; not an ``__init__`` argument.
     """
 
     address: str
@@ -40,7 +44,12 @@ class Unit:
     bathrooms: int = 1
     is_rental: bool = False
     fixed_rent: float = 0.0
-    _rate_per_sqm: float = field(default=0.0, repr=False)
+    _rate_per_sqm: float = field(default=0.0, init=False, repr=False)
+
+    @property
+    def rate_per_sqm(self) -> float:
+        """Annual rate per m² (DKK/m²/year) assigned by the cooperative."""
+        return self._rate_per_sqm
 
     @property
     def annual_charge(self) -> float:
@@ -61,8 +70,11 @@ class CooperativeUnit(Unit):
 
     Attributes:
         improvements: List of improvements made to this unit
-        share_value: The computed value of the cooperative share (DKK)
-        price_per_sqm: Price per m² used to compute share_value
+            (forbedringer), which are added on top of the share value when
+            computing the maximum sale price.
+        share_value: The computed value of the cooperative share (DKK),
+            i.e. ``price_per_sqm × area``. ``None`` until computed.
+        price_per_sqm: Share price per m² used to compute ``share_value``.
     """
 
     improvements: list["Improvement"] = field(default_factory=list)
@@ -81,6 +93,35 @@ class CooperativeUnit(Unit):
         self.price_per_sqm = new_price_per_sqm
         self.share_value = new_price_per_sqm * self.area
         return self.share_value
+
+    def improvements_value(self, current_year: int) -> float:
+        """Total remaining (depreciated) value of all improvements.
+
+        Args:
+            current_year: The year to evaluate the improvements at.
+
+        Returns:
+            Sum of :meth:`Improvement.remaining_value` in DKK.
+        """
+        return sum(imp.remaining_value(current_year) for imp in self.improvements)
+
+    def max_sale_price(self, current_year: int) -> float:
+        """Maximum sale price: share value plus remaining improvement value.
+
+        Args:
+            current_year: The year to evaluate the improvements at.
+
+        Returns:
+            Maximum sale price in DKK.
+
+        Raises:
+            ValueError: If the share value has not been computed yet.
+        """
+        if self.share_value is None:
+            raise ValueError(
+                "share_value is not set; call compute_share_value() first."
+            )
+        return self.share_value + self.improvements_value(current_year)
 
 
 @dataclass
@@ -112,7 +153,8 @@ class Improvement:
         year: The year the improvement was made
         cost: The original cost of the improvement (DKK)
         depreciation: Depreciation model ("linear" or "none")
-        lifespan: Depreciation period in years (default 10)
+        lifespan: Depreciation period in years (default 10). Must be
+            positive when ``depreciation="linear"``.
     """
 
     id: str
@@ -128,10 +170,20 @@ class Improvement:
             current_year: The year to evaluate the value at
 
         Returns:
-            Remaining value in DKK (never negative)
+            Remaining value in DKK (never negative). Improvements dated in
+            the future are returned at full cost.
+
+        Raises:
+            ValueError: If the depreciation model is unknown or the
+                lifespan is not positive for linear depreciation.
         """
         if self.depreciation == "none":
             return self.cost
+
+        if self.depreciation != "linear":
+            raise ValueError(f"Unknown depreciation model: {self.depreciation!r}")
+        if self.lifespan <= 0:
+            raise ValueError("lifespan must be positive for linear depreciation.")
 
         age = current_year - self.year
         if age < 0:

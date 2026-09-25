@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyABF"
-version = "0.1.0"
+dynamic = ["version"]
 authors = [
   { name="Mads Stevnsborg", email="madsstevnsborg@gmail.com" },
 ]
@@ -32,5 +32,16 @@ classifiers = [
 Homepage = "https://github.com/stevnsborg/pyABF"
 Issues = "https://github.com/stevnsborg/pyABF/issues"
 
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pyabf.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "README.md"]
+addopts = "--doctest-glob=README.md"
+pythonpath = ["src"]

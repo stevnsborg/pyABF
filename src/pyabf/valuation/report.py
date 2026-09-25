@@ -27,9 +27,8 @@ class ValuationReport:
     formatted report.
 
     Example:
-        >>> from pyabf.valuation import ValuationAssumptions, DCFModel
-        >>> from pyabf.valuation.report import ValuationReport
-        >>> model = DCFModel(assumptions)
+        >>> from pyabf.valuation import DCFModel, ValuationReport
+        >>> model = DCFModel(assumptions)  # a populated ValuationAssumptions
         >>> result = model.compute()
         >>> report = ValuationReport(result, model.assumptions)
         >>> print(report.to_text())
@@ -98,7 +97,7 @@ class ValuationReport:
             "Operating costs (base year)",
             f"  Total:                     {a.total_operating_cost:>10,.0f} DKK/yr",
             "",
-            "Improvement allowances",
+            "Improvement allowances (informational, included in base rent)",
         ]
 
         for imp in a.improvements:
@@ -128,7 +127,7 @@ class ValuationReport:
             "───────────────────────────────────────────────────────────────",
             "",
             f"  PV of budget-period cash flows:  {r.pv_budget_period:>15,.0f} DKK",
-            f"  Terminal NOI (year {len(r.pv_cash_flows) + 1}):          {r.terminal_noi:>15,.0f} DKK",
+            f"  Stabilised NOI (year {len(r.pv_cash_flows)} prices):  {r.terminal_noi:>15,.0f} DKK",
             f"  Terminal value (undiscounted):    {r.terminal_value:>15,.0f} DKK",
             f"  PV of terminal value:            {r.pv_terminal_value:>15,.0f} DKK",
             "",

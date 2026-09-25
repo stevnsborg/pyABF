@@ -6,10 +6,13 @@ Generates a grid of property values varying two key parameters:
     1. **Required real return** (afkastkrav) — varies ±0.75% in steps of 0.25%
     2. **Rent level** (boliglejeniveau) — varies ±2% in steps of 1%
 
-This mirrors the sensitivity table on page 29 of the Wiborg report
-(7 rows × 5 columns).
+The defaults (7 rows × 5 columns) match the sensitivity table commonly
+included in a valuarvurdering.  Grid dimensions and step sizes are
+configurable.
 
-The default grid dimensions and step sizes are configurable.
+When the rent level is varied, both ``modernized_rent_per_sqm`` and
+``total_base_residential_rent`` are scaled by the same percentage;
+``base_rent_per_sqm`` is left unchanged.
 
 Contains:
     SensitivityGrid   — Computed grid of valuations
@@ -115,17 +118,10 @@ def run_sensitivity(
     base_rent = assumptions.rent.modernized_rent_per_sqm
     base_residential = assumptions.rent.total_base_residential_rent
 
-    # Build offset arrays
-    yield_offsets = np.arange(
-        -yield_steps * yield_step_size,
-        (yield_steps + 1) * yield_step_size,
-        yield_step_size,
-    )
-    rent_offsets = np.arange(
-        -rent_steps * rent_step_size,
-        (rent_steps + 1) * rent_step_size,
-        rent_step_size,
-    )
+    # Build offset arrays from integer steps (float arange can overshoot
+    # and add an extra row/column)
+    yield_offsets = np.arange(-yield_steps, yield_steps + 1) * yield_step_size
+    rent_offsets = np.arange(-rent_steps, rent_steps + 1) * rent_step_size
 
     # Round to avoid floating-point drift
     yield_offsets = np.round(yield_offsets, 6)

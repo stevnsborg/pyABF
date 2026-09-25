@@ -12,6 +12,17 @@ The cooperative sets two annual rates (DKK/m²/year):
 These are propagated to each unit and scaled by the unit's area.
 Rental units with a fixed_rent override the rate-based calculation.
 
+Example:
+    >>> from pyabf import HousingCooperative, CooperativeUnit, Loan
+    >>> coop = HousingCooperative(
+    ...     name="A/B Example",
+    ...     units=[CooperativeUnit("Street 1, st.", area=70, rooms=3)],
+    ...     owned_rate_per_sqm=650,
+    ...     loans=[Loan("Loan 1", principal=10_000_000, interest_rate=0.02)],
+    ... )
+    >>> coop.total_annual_income
+    45500.0
+
 Contains:
     HousingCooperative — The main class
 """
@@ -25,13 +36,7 @@ from typing import Any
 from .units import Unit, CooperativeUnit, CommercialUnit
 from .loan import Loan
 from .accounting import AnnualReport
-from .budget import (
-    Budget,
-    BudgetTracker,
-    AccountMapping,
-    BalanceSheetRow,
-    load_balance_sheet_csv,
-)
+from .budget import Budget, BudgetTracker, AccountMapping
 from .tax import compute_property_tax
 from .valuation import (
     ValuationAssumptions,
@@ -53,6 +58,12 @@ class HousingCooperative:
     All units — residential and commercial, owned and rented — are stored
     in a single list.  Use the filtering properties to break them down
     by type and ownership.
+
+    Note:
+        Rates are pushed to the units when the cooperative is created and
+        whenever ``set_owned_rate`` / ``set_rental_rate`` is called.  If
+        you append units to ``units`` or change a unit's ``is_rental``
+        afterwards, call :meth:`refresh_rates` to update them.
 
     Attributes:
         name: Name of the cooperative.
@@ -77,6 +88,22 @@ class HousingCooperative:
 
     def __post_init__(self) -> None:
         """Propagate rates to all units after initialization."""
+        self._propagate_rates()
+
+    def refresh_rates(self) -> None:
+        """Re-apply the cooperative's rates to all units.
+
+        Call this after adding units or changing a unit's ``is_rental``.
+        """
+        self._propagate_rates()
+
+    def add_unit(self, unit: Unit) -> None:
+        """Add a unit and apply the cooperative's rate to it.
+
+        Args:
+            unit: The unit to add.
+        """
+        self.units.append(unit)
         self._propagate_rates()
 
     def _propagate_rates(self) -> None:
@@ -246,7 +273,8 @@ class HousingCooperative:
     def total_annual_debt_service(self) -> float:
         """Total annual debt service (first year payments) across all loans (DKK).
 
-        Sums the first period's total_payment × payments_per_year for each loan.
+        Sums the first period's total_payment × payments_per_year for each
+        loan, i.e. the ydelse (interest, contribution and principal).
         """
         total = 0.0
         for loan in self.loans:
@@ -275,19 +303,28 @@ class HousingCooperative:
     # Annual reports
     # ═══════════════════════════════════════════════════════════════════
 
-    def create_annual_report(self, year: int, from_defaults: bool = True) -> AnnualReport:
+    def create_annual_report(
+        self,
+        year: int,
+        from_defaults: bool = True,
+        notes: dict[str, tuple[str, bool]] | None = None,
+    ) -> AnnualReport:
         """Create an annual report for a given year and store it.
+
+        Replaces any existing report for the same year.
 
         Args:
             year: The fiscal year.
-            from_defaults: If True, pre-populate with the 10 standard
-                note categories.
+            from_defaults: If True, pre-populate with empty notes.
+            notes: Custom note layout ``{note_id: (name, is_expense)}``
+                used when ``from_defaults`` is True.  Defaults to
+                :data:`pyabf.accounting.DEFAULT_NOTES`.
 
         Returns:
             The newly created AnnualReport.
         """
         if from_defaults:
-            report = AnnualReport.from_defaults(year)
+            report = AnnualReport.from_defaults(year, notes=notes)
         else:
             report = AnnualReport(year=year)
         self.annual_reports[year] = report
@@ -439,16 +476,20 @@ class HousingCooperative:
         old_property_value: float,
         tax_rate: float,
         tax_year: int,
+        **tax_rules: Any,
     ) -> tuple[float, float]:
         """Compute property tax for a given year (2024+ Danish rules).
 
-        Delegates to ``pyabf.tax.compute_property_tax``.
+        Delegates to :func:`pyabf.tax.compute_property_tax`; see there for
+        the exact meaning of each argument.
 
         Args:
-            new_property_value: The new official property assessment (DKK).
-            old_property_value: The old property assessment (DKK).
+            new_property_value: The new official land assessment (DKK).
+            old_property_value: The pre-reform tax level (DKK).
             tax_rate: The land tax rate (e.g. 0.026).
             tax_year: The year to compute tax for (>= 2024).
+            **tax_rules: Optional rule overrides forwarded to
+                ``compute_property_tax`` (e.g. ``max_annual_increase_rate``).
 
         Returns:
             Tuple of (tax, increase) in DKK.
@@ -458,6 +499,7 @@ class HousingCooperative:
             old_property_value=old_property_value,
             tax_rate=tax_rate,
             tax_year=tax_year,
+            **tax_rules,
         )
 
     def project_property_tax(
@@ -467,23 +509,28 @@ class HousingCooperative:
         tax_rate: float,
         start_year: int = 2024,
         end_year: int = 2040,
+        **tax_rules: Any,
     ) -> list[dict[str, float | int]]:
         """Project property tax over a range of years.
 
         Args:
-            new_property_value: The new assessment (DKK).
-            old_property_value: The old assessment (DKK).
+            new_property_value: The new official land assessment (DKK).
+            old_property_value: The pre-reform tax level (DKK).
             tax_rate: The land tax rate.
             start_year: First year to project (>= 2024).
             end_year: Last year to project (inclusive).
+            **tax_rules: Optional rule overrides forwarded to
+                :func:`pyabf.tax.compute_property_tax`.
 
         Returns:
-            List of dicts with keys: year, tax, increase.
+            List of dicts with keys: year, tax, increase.  Pass to
+            ``pandas.DataFrame`` for a tabular view.
         """
         rows = []
         for year in range(start_year, end_year + 1):
             tax, increase = compute_property_tax(
-                new_property_value, old_property_value, tax_rate, year
+                new_property_value, old_property_value, tax_rate, year,
+                **tax_rules,
             )
             rows.append({"year": year, "tax": tax, "increase": increase})
         return rows
@@ -508,6 +555,10 @@ class HousingCooperative:
                    - Debt (market value) - Other liabilities
             Share price = Equity / Owner-occupied residential area
 
+        Debt is taken at market value (``Loan.market_value``, i.e.
+        principal × bond price).  Returns 0.0 when there is no
+        owner-occupied residential area.
+
         Args:
             property_value: The assessed property value (DKK).
             other_assets: Other assets besides the property (DKK).
@@ -528,6 +579,9 @@ class HousingCooperative:
 
     def update_share_values(self, share_price: float) -> None:
         """Update share values for all owner-occupied residential units.
+
+        Only :class:`CooperativeUnit` instances are updated; plain
+        :class:`Unit` objects have no share value.
 
         Args:
             share_price: Share price in DKK/m².

@@ -1,9 +1,9 @@
 """
 valuation — DCF property valuation for Danish housing cooperatives.
 
-This subpackage replaces the monolithic ``compute_net_present_value()``
-function with a modular, transparent model built from configurable
-assumption dataclasses.
+A modular, transparent DCF model built from configurable assumption
+dataclasses.  All assumptions default to zero/empty, so every valuation
+is driven entirely by the property-specific values you pass in.
 
 Modules:
     assumptions  — All configurable parameters (ValuationAssumptions)
@@ -13,9 +13,17 @@ Modules:
     report       — Human-readable report generation
 
 Quick start:
-    >>> from pyabf.valuation import ValuationAssumptions, DCFModel
-    >>> model = DCFModel(ValuationAssumptions())  # Wiborg TR 1976 defaults
-    >>> result = model.compute()
+    >>> from pyabf.valuation import (
+    ...     ValuationAssumptions, PropertyDescription, RentAssumptions,
+    ...     OperatingCostAssumptions, DCFModel,
+    ... )
+    >>> assumptions = ValuationAssumptions(
+    ...     property_desc=PropertyDescription(
+    ...         total_building_area=5_000, residential_area=4_500),
+    ...     rent=RentAssumptions(total_base_residential_rent=3_600_000),
+    ...     operating=OperatingCostAssumptions(total_operating_cost=1_200_000),
+    ... )
+    >>> result = DCFModel(assumptions).compute()
     >>> print(f"Property value: {result.total_value_rounded:,.0f} DKK")
 """
 
@@ -35,10 +43,9 @@ from .dcf_model import DCFModel, ValuationResult
 from .sensitivity import SensitivityGrid, run_sensitivity
 from .report import ValuationReport
 
-# Backward compatibility: the original monolithic function is preserved
-# in _legacy.py and re-exported here so that existing code using
-#   from pyabf.valuation import compute_net_present_value
-# continues to work.
+# Deprecated: the original monolithic function is kept in _legacy.py so
+# that ``from pyabf.valuation import compute_net_present_value`` keeps
+# working.  It emits a DeprecationWarning; use DCFModel instead.
 from ._legacy import compute_net_present_value  # noqa: F401
 
 __all__ = [

@@ -224,3 +224,33 @@ class TestHelpers:
     def test_extrapolate_full_year(self):
         result = BudgetTracker._extrapolate_annual(100_000, 12, 12)
         assert result == pytest.approx(100_000)
+
+
+class TestGeneralisedOptions:
+    def _tracker(self, **mapping_kw):
+        budget = Budget(fiscal_year="2025")
+        ops = BudgetCategory("ops", "Ops", CategoryType.EXPENSE)
+        ops.add_item(BudgetLineItem("ins", "Insurance", budgeted=1_000))
+        other = BudgetCategory("other", "Other", CategoryType.EXPENSE)
+        budget.add_category(ops)
+        budget.add_category(other)
+        mapping = AccountMapping({"100": "ins"}, **mapping_kw)
+        return BudgetTracker(budget, mapping)
+
+    def test_unmapped_category_collects_accounts(self):
+        tracker = self._tracker(unmapped_category="other")
+        rows = [
+            BalanceSheetRow("100", "Insurance", ytd_balance=900),
+            BalanceSheetRow("200", "Misc", ytd_balance=50),
+        ]
+        assert tracker.update_actuals(rows) == {"200": 50}
+        item = tracker.budget.find_item("account:200")
+        assert item.name == "Misc" and item.actual == 50
+
+    def test_suggestion_parameters(self):
+        tracker = self._tracker()
+        tracker.update_actuals([BalanceSheetRow("100", "Insurance", ytd_balance=1_234)])
+        nxt = tracker.suggest_next_year_budget(
+            prior_year_actuals={"ins": 1_000}, current_year_weight=0.5, rounding=1,
+        )
+        assert nxt.find_item("ins").budgeted == 1_117

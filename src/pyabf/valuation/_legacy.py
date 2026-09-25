@@ -1,15 +1,17 @@
 """
-valuation.py — Property valuation via the Discounted Cash Flow (DCF) model.
+_legacy.py — Deprecated monolithic DCF valuation function.
 
-The DCF model is used to estimate the market value of a cooperative
-housing property based on projected future rental income and
-operating expenses.
+Kept only for backward compatibility.  New code should use
+:class:`pyabf.valuation.DCFModel` with :class:`ValuationAssumptions`,
+which is documented, configurable and tested.
 
 Contains:
-    compute_net_present_value — Main DCF valuation function
+    compute_net_present_value — Deprecated DCF valuation function
 """
 
 from __future__ import annotations
+
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -29,6 +31,9 @@ def compute_net_present_value(
     extra_allowance: float = 0.0,
 ) -> tuple[float, float, NDArray]:
     """Compute the property's net present value using a DCF model.
+
+    .. deprecated::
+        Use :class:`pyabf.valuation.DCFModel` instead.
 
     The model calculates the present value of expected cash flows
     over the evaluation period, plus a terminal value (exit value)
@@ -56,6 +61,11 @@ def compute_net_present_value(
                       [3] (reserved), [4] operating, [5] modernization,
                       [6] extra_allowance, [7] deduction
     """
+    warnings.warn(
+        "compute_net_present_value is deprecated; use pyabf.valuation.DCFModel.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     discount_rate = inflation_rate + required_return
     n = evaluation_period
 
