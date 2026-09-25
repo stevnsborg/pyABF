@@ -4,41 +4,44 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyABF"
-version = "0.0.1"
+dynamic = ["version"]
 authors = [
   { name="Mads Stevnsborg", email="madsstevnsborg@gmail.com" },
 ]
 maintainers = [
   { name="Mads Stevnsborg", email="madsstevnsborg@gmail.com" },
 ]
-description = "A python package for administering and calculating the value of an Andelsbolig and Andelsboligforening using the currently established methods as of 2025."
+description = "Værktøjer til beregning og modellering af økonomi i danske andelsboligforeninger."
 readme = "README.md"
 requires-python = ">=3.12"
 license = {file = "LICENSE"}
 dependencies = [
-  "numpy==2.2.3",
-  "pandas==2.2.3",
+  "numpy>=2.0",
+  "pandas>=2.0",
 ]
 classifiers = [
-  # How mature is this project? Common values are
-  #   3 - Alpha
-  #   4 - Beta
-  #   5 - Production/Stable
   "Development Status :: 3 - Alpha",
-
-  # Indicate who your project is intended for
   "Intended Audience :: Developers",
-  "Topic :: Real-Estate Analysis :: Data Aquisition Tools",
   "Environment :: Console",
-
-  # Specify the Python versions you support here.
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.6",
-  "Programming Language :: Python :: 3.7",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
-Homepage = "https://github.com/stevnsborg/pyBBR"
-Issues = "https://github.com/stevnsborg/pyBBR/issues"
+Homepage = "https://github.com/stevnsborg/pyABF"
+Issues = "https://github.com/stevnsborg/pyABF/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pyabf.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "README.md"]
+addopts = "--doctest-glob=README.md"
+pythonpath = ["src"]

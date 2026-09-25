@@ -176,3 +176,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# Specific cooperative data (not part of the library)
+ABTR76/
