@@ -38,6 +38,7 @@ from .loan import Loan
 from .accounting import AnnualReport
 from .budget import Budget, BudgetTracker, AccountMapping
 from .tax import compute_property_tax
+from .ois import OISClient, fetch_units
 from .valuation import (
     ValuationAssumptions,
     DCFModel,
@@ -75,6 +76,8 @@ class HousingCooperative:
         budgets: Dict of {fiscal_year_label: Budget}.
         account_mapping: Mapping from bookkeeping account numbers to
             budget line-item keys.  Shared across all budgets.
+        bfe_numbers: BFE numbers of the properties the cooperative owns.
+            Used by :meth:`add_units_from_ois` to load units from OIS.dk.
     """
 
     name: str
@@ -85,10 +88,80 @@ class HousingCooperative:
     annual_reports: dict[int, AnnualReport] = field(default_factory=dict)
     budgets: dict[str, Budget] = field(default_factory=dict)
     account_mapping: AccountMapping = field(default_factory=AccountMapping)
+    bfe_numbers: list[int] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Propagate rates to all units after initialization."""
         self._propagate_rates()
+
+    @classmethod
+    def from_ois(
+        cls,
+        name: str,
+        bfe_numbers: list[int],
+        client: OISClient | None = None,
+        **kwargs: Any,
+    ) -> HousingCooperative:
+        """Create a cooperative with its units loaded from OIS.dk.
+
+        Args:
+            name: Name of the cooperative.
+            bfe_numbers: BFE numbers of the cooperative's properties.
+            client: OIS client to use; a default one if omitted.
+            **kwargs: Other ``HousingCooperative`` fields (rates, loans, ...).
+
+        Returns:
+            The new cooperative.
+        """
+        coop = cls(name=name, bfe_numbers=list(bfe_numbers), **kwargs)
+        coop.add_units_from_ois(client=client)
+        return coop
+
+    def add_units_from_ois(
+        self,
+        bfe_numbers: list[int] | None = None,
+        client: OISClient | None = None,
+        include_inactive: bool = False,
+    ) -> list[Unit]:
+        """Fetch units from OIS.dk and add them to the cooperative.
+
+        Housing units become :class:`CooperativeUnit`, all others
+        :class:`CommercialUnit`; every unit is added as owner-occupied
+        (see :mod:`pyabf.ois`).  Units whose BBR id is already present in
+        ``units`` are skipped, so calling this again does not create
+        duplicates.  BFE numbers passed here are appended to
+        ``bfe_numbers``.
+
+        Args:
+            bfe_numbers: BFE numbers to fetch.  Defaults to
+                ``self.bfe_numbers``.
+            client: OIS client to use; a default one if omitted.
+            include_inactive: Also add units BBR marks as closed,
+                historic or erroneous.
+
+        Returns:
+            The units that were added.
+
+        Raises:
+            OISError: If a BFE number cannot be fetched.
+        """
+        if bfe_numbers is None:
+            bfe_numbers = self.bfe_numbers
+        else:
+            self.bfe_numbers.extend(
+                b for b in bfe_numbers if b not in self.bfe_numbers
+            )
+        existing = {u.bbr_id for u in self.units if u.bbr_id is not None}
+        added = [
+            ois_unit.to_unit()
+            for ois_unit in fetch_units(
+                bfe_numbers, client=client, include_inactive=include_inactive
+            )
+            if ois_unit.bbr_id not in existing
+        ]
+        self.units.extend(added)
+        self._propagate_rates()
+        return added
 
     def refresh_rates(self) -> None:
         """Re-apply the cooperative's rates to all units.

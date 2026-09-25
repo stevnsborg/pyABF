@@ -33,6 +33,7 @@ pytest
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
 | `pyabf.tax` | `compute_property_tax`: grundskyld under the 2024+ transition rules |
 | `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `ValuationReport` |
+| `pyabf.ois` | `OISClient`, `fetch_units`, `fetch_floors`: load a property's BBR units and floors (basements, roof floors) from OIS.dk by BFE number |
 
 All amounts are in DKK. Rates are fractions (`0.02` = 2 %).
 
@@ -59,6 +60,25 @@ All amounts are in DKK. Rates are fractions (`0.02` = 2 %).
 >>> round(coop.compute_and_update_shares(property_value=10_000_000))
 39286
 
+```
+
+### Loading units from OIS.dk
+
+Given the BFE numbers of the cooperative's properties, the units (area,
+rooms, bathrooms, address) can be fetched from BBR via OIS.dk. Housing
+units become `CooperativeUnit`, everything else `CommercialUnit`. BBR does
+not say which units the cooperative lets out, so all units start as
+owner-occupied.
+
+```python
+coop = HousingCooperative.from_ois("A/B Example", bfe_numbers=[6018310],
+                                   owned_rate_per_sqm=650)
+# or, on an existing cooperative:
+coop.add_units_from_ois([6018310])
+
+# Basements and roof floors are not units in BBR; fetch them separately
+from pyabf import fetch_floors
+basements = [f for f in fetch_floors([6018310]) if f.kind == "basement"]
 ```
 
 ### Loans

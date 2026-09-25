@@ -1,0 +1,642 @@
+<title>A/B TR 1976 Scenarios</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --surface-2: #f5f4f1;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --border: #e1e0d9;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --series-base: #2a78d6;
+    --series-a: #eb6834;
+    --series-b: #1baf7a;
+    --series-c: #eda100;
+    --good: #006300;
+    --good-bg: #e8f5e8;
+    --accent-bg: #edf4fc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface-1: #1a1a19;
+      --surface-2: #232322;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --border: #2c2c2a;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --series-base: #3987e5;
+      --series-a: #d95926;
+      --series-b: #199e70;
+      --series-c: #c98500;
+      --good: #0ca30c;
+      --good-bg: #1a2e1a;
+      --accent-bg: #1a2433;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --border: #2c2c2a;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --series-base: #3987e5;
+    --series-a: #d95926;
+    --series-b: #199e70;
+    --series-c: #c98500;
+    --good: #0ca30c;
+    --good-bg: #1a2e1a;
+    --accent-bg: #1a2433;
+  }
+
+  body {
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding-inline: 16px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 2rem 0 0.25rem;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin: 0 0 2rem;
+    line-height: 1.5;
+  }
+
+  /* ── Stat tiles ── */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 2rem;
+  }
+  .tile {
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .tile-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+  .tile-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .tile-delta {
+    font-size: 0.8rem;
+    margin-top: 4px;
+    color: var(--good);
+    font-weight: 500;
+  }
+
+  /* ── Section headings ── */
+  h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 2.5rem 0 1rem;
+    color: var(--text-primary);
+  }
+
+  /* ── Comparison table ── */
+  .table-wrap {
+    overflow-x: auto;
+    margin-bottom: 2rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    text-align: right;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child {
+    text-align: left;
+    font-weight: 500;
+  }
+  thead th {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--baseline);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  .highlight-row { background: var(--accent-bg); }
+  .delta-pos { color: var(--good); font-weight: 500; }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .legend-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ── Charts ── */
+  .chart-container {
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 2rem;
+  }
+  .chart-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  svg text {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  /* ── Tooltip ── */
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.12s;
+    max-width: 240px;
+  }
+  .tooltip.visible { opacity: 1; }
+  .tooltip-label { color: var(--text-muted); margin-bottom: 2px; }
+  .tooltip-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ── Notes ── */
+  .notes {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 500px) {
+    .tiles { grid-template-columns: 1fr 1fr; }
+    th, td { padding: 8px 8px; font-size: 0.78rem; }
+  }
+</style>
+
+<h1>Andelsværdi — Scenario Analysis</h1>
+<p class="subtitle">A/B TR 1976 &middot; DCF property valuation with three what-if scenarios against the Wiborg base case</p>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="tile-label">Base case value</div>
+    <div class="tile-value">182.0M</div>
+    <div class="tile-delta" style="color:var(--text-muted)">DKK &middot; reference</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">A: Maintenance −25%</div>
+    <div class="tile-value">210.1M</div>
+    <div class="tile-delta">+28.1M (+15.5%)</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">B: Improvements ×2</div>
+    <div class="tile-value">205.5M</div>
+    <div class="tile-delta">+23.5M (+12.9%)</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">C: Both combined</div>
+    <div class="tile-value">233.7M</div>
+    <div class="tile-delta">+51.6M (+28.4%)</div>
+  </div>
+</div>
+
+<h2>Comparison table</h2>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Metric</th>
+      <th>Base Case</th>
+      <th>A: Maint. −25%</th>
+      <th>B: Impr. ×2</th>
+      <th>C: Both</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Property value (DKK)</td>
+      <td>182,004,000</td>
+      <td>210,124,000</td>
+      <td>205,533,000</td>
+      <td>233,653,000</td>
+    </tr>
+    <tr>
+      <td>Δ vs base</td>
+      <td>—</td>
+      <td class="delta-pos">+28,120,000</td>
+      <td class="delta-pos">+23,529,000</td>
+      <td class="delta-pos">+51,649,000</td>
+    </tr>
+    <tr>
+      <td>Δ vs base (%)</td>
+      <td>—</td>
+      <td class="delta-pos">+15.5%</td>
+      <td class="delta-pos">+12.9%</td>
+      <td class="delta-pos">+28.4%</td>
+    </tr>
+    <tr><td colspan="5" style="height:4px;padding:0;border:none"></td></tr>
+    <tr>
+      <td>PV budget period</td>
+      <td>29,105,000</td>
+      <td>39,789,000</td>
+      <td>38,045,000</td>
+      <td>48,729,000</td>
+    </tr>
+    <tr>
+      <td>PV terminal value</td>
+      <td>152,899,000</td>
+      <td>170,335,000</td>
+      <td>167,488,000</td>
+      <td>184,924,000</td>
+    </tr>
+    <tr>
+      <td>Terminal NOI</td>
+      <td>10,706,000</td>
+      <td>11,927,000</td>
+      <td>11,727,000</td>
+      <td>12,948,000</td>
+    </tr>
+    <tr><td colspan="5" style="height:4px;padding:0;border:none"></td></tr>
+    <tr>
+      <td>Operating cost (base yr)</td>
+      <td>3,628,333</td>
+      <td>2,721,250</td>
+      <td>3,628,333</td>
+      <td>2,721,250</td>
+    </tr>
+    <tr>
+      <td>Improvement allowance</td>
+      <td>759,000</td>
+      <td>759,000</td>
+      <td>1,518,000</td>
+      <td>1,518,000</td>
+    </tr>
+    <tr>
+      <td>Base residential rent</td>
+      <td>5,464,327</td>
+      <td>5,464,327</td>
+      <td>6,223,327</td>
+      <td>6,223,327</td>
+    </tr>
+    <tr><td colspan="5" style="height:4px;padding:0;border:none"></td></tr>
+    <tr class="highlight-row">
+      <td>Share price (DKK/m²)</td>
+      <td>24,979</td>
+      <td>29,258</td>
+      <td>28,560</td>
+      <td>32,838</td>
+    </tr>
+    <tr class="highlight-row">
+      <td>62 m² unit value</td>
+      <td>1,548,720</td>
+      <td>1,814,001</td>
+      <td>1,770,693</td>
+      <td>2,035,974</td>
+    </tr>
+    <tr class="highlight-row">
+      <td>75 m² unit value</td>
+      <td>1,873,452</td>
+      <td>2,194,356</td>
+      <td>2,141,967</td>
+      <td>2,462,872</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Property value by scenario</h2>
+<div class="chart-container">
+  <div class="chart-title">Total DCF property value (million DKK)</div>
+  <div class="legend">
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-base)"></span>Base Case</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-a)"></span>A: Maintenance −25%</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-b)"></span>B: Improvements ×2</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-c)"></span>C: Both</span>
+  </div>
+  <div id="bar-chart"></div>
+</div>
+
+<h2>Value composition</h2>
+<div class="chart-container">
+  <div class="chart-title">PV budget period vs PV terminal value (million DKK)</div>
+  <div class="legend">
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-base);opacity:0.5"></span>PV budget period</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-base)"></span>PV terminal value</span>
+  </div>
+  <div id="stacked-chart"></div>
+</div>
+
+<h2>Net operating income over budget period</h2>
+<div class="chart-container">
+  <div class="chart-title">Projected NOI by year (million DKK, nominal)</div>
+  <div class="legend">
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-base)"></span>Base Case</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-a)"></span>A: Maintenance −25%</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-b)"></span>B: Improvements ×2</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--series-c)"></span>C: Both</span>
+  </div>
+  <div id="noi-chart"></div>
+</div>
+
+<h2>Share price impact</h2>
+<div class="chart-container">
+  <div class="chart-title">Share price per m² (DKK/m²) — change from base case</div>
+  <div id="share-chart"></div>
+</div>
+
+<div class="notes">
+  Assumptions: Wiborg + Partnere base case (case 600688). Discount rate 5.25% (2% inflation + 3.25% real return), 15-year budget period. Loans: 15M fixed + 8M variable; other assets 2.5M; other liabilities 0.5M. Scenario A reduces total operating cost by 25%. Scenario B doubles improvement allowance costs, increasing the cost-determined base residential rent by the extra allowance. Scenario C combines both.
+</div>
+
+<div class="tooltip" id="tt">
+  <div class="tooltip-label" id="tt-label"></div>
+  <div class="tooltip-value" id="tt-value"></div>
+</div>
+
+<script>
+(function() {
+  const fmt = n => n.toLocaleString('da-DK');
+  const fmtM = n => (n / 1e6).toFixed(1) + 'M';
+
+  // Resolve CSS vars
+  const cs = getComputedStyle(document.documentElement);
+  const colors = {
+    base: cs.getPropertyValue('--series-base').trim(),
+    a: cs.getPropertyValue('--series-a').trim(),
+    b: cs.getPropertyValue('--series-b').trim(),
+    c: cs.getPropertyValue('--series-c').trim(),
+    muted: cs.getPropertyValue('--text-muted').trim(),
+    secondary: cs.getPropertyValue('--text-secondary').trim(),
+    primary: cs.getPropertyValue('--text-primary').trim(),
+    gridline: cs.getPropertyValue('--gridline').trim(),
+    baseline: cs.getPropertyValue('--baseline').trim(),
+    surface: cs.getPropertyValue('--surface-2').trim(),
+  };
+
+  const data = {
+    labels: ['Base Case', 'A: Maint. −25%', 'B: Impr. ×2', 'C: Both'],
+    shortLabels: ['Base', 'A', 'B', 'C'],
+    colors: [colors.base, colors.a, colors.b, colors.c],
+    values: [182004331, 210124080, 205533472, 233653220],
+    pvBudget: [29104972, 39789205, 38044981, 48729214],
+    pvTerminal: [152899359, 170334875, 167488490, 184924006],
+    sharePrice: [24979, 29258, 28560, 32838],
+    shareDelta: [0, 4279, 3581, 7859],
+    noi: {
+      base: [82965,472083,876733,1297379,1734501,2188589,2660147,3149691,3657754,4184879,4731625,5298568,5886296,6495413,7126541],
+      a: [1008190,1415812,1839337,2279235,2735995,3210112,3702100,4212484,4741802,5290608,5859469,6448969,7059705,7692290,8347355],
+      b: [857145,1261746,1682189,2118945,2572499,3043347,3531999,4038981,4564829,5110095,5675346,6261163,6868143,7496897,8148055],
+      c: [1782370,2205476,2644793,3100801,3573992,4064870,4573953,5101774,5648877,6215825,6803190,7411564,8041552,8693775,9368869],
+    }
+  };
+
+  // Tooltip
+  const tt = document.getElementById('tt');
+  const ttLabel = document.getElementById('tt-label');
+  const ttValue = document.getElementById('tt-value');
+
+  function showTip(e, label, value) {
+    ttLabel.textContent = label;
+    ttValue.textContent = value;
+    tt.classList.add('visible');
+    const x = Math.min(e.clientX + 12, window.innerWidth - 250);
+    const y = Math.max(e.clientY - 50, 8);
+    tt.style.left = x + 'px';
+    tt.style.top = y + 'px';
+  }
+  function hideTip() { tt.classList.remove('visible'); }
+
+  // ── Bar chart: Total property value ──
+  (function() {
+    const W = 700, H = 280, ml = 60, mr = 60, mt = 10, mb = 50;
+    const pw = W - ml - mr, ph = H - mt - mb;
+    const max = 250e6;
+    const barW = 22;
+    const gap = pw / 4;
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">`;
+    // Y gridlines
+    for (let v = 0; v <= 250; v += 50) {
+      const y = mt + ph - (v / 250) * ph;
+      svg += `<line x1="${ml}" x2="${W-mr}" y1="${y}" y2="${y}" stroke="${colors.gridline}" stroke-width="1"/>`;
+      svg += `<text x="${ml-8}" y="${y+4}" text-anchor="end" fill="${colors.muted}" font-size="11">${v}</text>`;
+    }
+    // Baseline
+    svg += `<line x1="${ml}" x2="${W-mr}" y1="${mt+ph}" y2="${mt+ph}" stroke="${colors.baseline}" stroke-width="1"/>`;
+
+    data.values.forEach((v, i) => {
+      const cx = ml + gap * i + gap / 2;
+      const barH = (v / max) * ph;
+      const y = mt + ph - barH;
+      svg += `<rect x="${cx - barW/2}" y="${y}" width="${barW}" height="${barH}" fill="${data.colors[i]}" rx="4" ry="4" style="cursor:pointer"
+        onmousemove="window.__barTip(event,${i})" onmouseleave="window.__barHide()"/>`;
+      // Value label
+      svg += `<text x="${cx}" y="${y - 8}" text-anchor="middle" fill="${colors.secondary}" font-size="12" font-weight="600">${(v/1e6).toFixed(0)}M</text>`;
+      // X label
+      svg += `<text x="${cx}" y="${mt+ph+20}" text-anchor="middle" fill="${colors.muted}" font-size="11">${data.shortLabels[i]}</text>`;
+    });
+    svg += '</svg>';
+    document.getElementById('bar-chart').innerHTML = svg;
+
+    window.__barTip = (e, i) => showTip(e, data.labels[i], fmt(data.values[i]) + ' DKK');
+    window.__barHide = hideTip;
+  })();
+
+  // ── Stacked bar: PV budget + PV terminal ──
+  (function() {
+    const W = 700, H = 280, ml = 60, mr = 60, mt = 10, mb = 50;
+    const pw = W - ml - mr, ph = H - mt - mb;
+    const max = 250e6;
+    const barW = 22;
+    const gap = pw / 4;
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">`;
+    for (let v = 0; v <= 250; v += 50) {
+      const y = mt + ph - (v / 250) * ph;
+      svg += `<line x1="${ml}" x2="${W-mr}" y1="${y}" y2="${y}" stroke="${colors.gridline}" stroke-width="1"/>`;
+      svg += `<text x="${ml-8}" y="${y+4}" text-anchor="end" fill="${colors.muted}" font-size="11">${v}</text>`;
+    }
+    svg += `<line x1="${ml}" x2="${W-mr}" y1="${mt+ph}" y2="${mt+ph}" stroke="${colors.baseline}" stroke-width="1"/>`;
+
+    data.pvBudget.forEach((bv, i) => {
+      const tv = data.pvTerminal[i];
+      const cx = ml + gap * i + gap / 2;
+      // Terminal (bottom)
+      const tH = (tv / max) * ph;
+      const tY = mt + ph - tH;
+      svg += `<rect x="${cx-barW/2}" y="${tY}" width="${barW}" height="${tH}" fill="${data.colors[i]}" rx="0" style="cursor:pointer"
+        onmousemove="window.__stackTip(event,${i},'terminal')" onmouseleave="window.__barHide()"/>`;
+      // Budget (top, stacked) – 2px surface gap
+      const bH = (bv / max) * ph;
+      const bY = tY - bH - 2;
+      svg += `<rect x="${cx-barW/2}" y="${bY}" width="${barW}" height="${bH}" fill="${data.colors[i]}" opacity="0.45" rx="4" ry="4" style="cursor:pointer"
+        onmousemove="window.__stackTip(event,${i},'budget')" onmouseleave="window.__barHide()"/>`;
+      // Total label
+      const total = bv + tv;
+      svg += `<text x="${cx}" y="${bY - 8}" text-anchor="middle" fill="${colors.secondary}" font-size="12" font-weight="600">${(total/1e6).toFixed(0)}M</text>`;
+      svg += `<text x="${cx}" y="${mt+ph+20}" text-anchor="middle" fill="${colors.muted}" font-size="11">${data.shortLabels[i]}</text>`;
+    });
+    svg += '</svg>';
+    document.getElementById('stacked-chart').innerHTML = svg;
+
+    window.__stackTip = (e, i, part) => {
+      const label = data.labels[i] + (part === 'budget' ? ' — PV budget period' : ' — PV terminal value');
+      const val = part === 'budget' ? data.pvBudget[i] : data.pvTerminal[i];
+      showTip(e, label, fmt(val) + ' DKK');
+    };
+  })();
+
+  // ── Line chart: NOI over 15 years ──
+  (function() {
+    const W = 700, H = 320, ml = 60, mr = 80, mt = 10, mb = 40;
+    const pw = W - ml - mr, ph = H - mt - mb;
+    const maxNoi = 10e6;
+    const years = 15;
+    const series = [
+      { key: 'c', label: 'C: Both', color: colors.c },
+      { key: 'a', label: 'A: Maint. −25%', color: colors.a },
+      { key: 'b', label: 'B: Impr. ×2', color: colors.b },
+      { key: 'base', label: 'Base Case', color: colors.base },
+    ];
+
+    function xPos(yr) { return ml + ((yr - 1) / (years - 1)) * pw; }
+    function yPos(v) { return mt + ph - (v / maxNoi) * ph; }
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">`;
+
+    // Y gridlines
+    for (let v = 0; v <= 10; v += 2) {
+      const y = yPos(v * 1e6);
+      svg += `<line x1="${ml}" x2="${W-mr}" y1="${y}" y2="${y}" stroke="${colors.gridline}" stroke-width="1"/>`;
+      svg += `<text x="${ml-8}" y="${y+4}" text-anchor="end" fill="${colors.muted}" font-size="11">${v}M</text>`;
+    }
+    svg += `<line x1="${ml}" x2="${W-mr}" y1="${mt+ph}" y2="${mt+ph}" stroke="${colors.baseline}" stroke-width="1"/>`;
+
+    // X labels
+    for (let yr = 1; yr <= 15; yr += 2) {
+      svg += `<text x="${xPos(yr)}" y="${mt+ph+18}" text-anchor="middle" fill="${colors.muted}" font-size="11">${yr}</text>`;
+    }
+
+    // Lines (render back-to-front so base is on top)
+    series.forEach(s => {
+      const pts = data.noi[s.key].map((v, i) => `${xPos(i+1)},${yPos(v)}`).join(' ');
+      svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+      // End dot with surface ring
+      const lastV = data.noi[s.key][14];
+      const ex = xPos(15), ey = yPos(lastV);
+      svg += `<circle cx="${ex}" cy="${ey}" r="6" fill="${colors.surface}" stroke="none"/>`;
+      svg += `<circle cx="${ex}" cy="${ey}" r="4" fill="${s.color}"/>`;
+
+      // End label
+      svg += `<text x="${ex+10}" y="${ey+4}" fill="${colors.secondary}" font-size="11" font-weight="500">${(lastV/1e6).toFixed(1)}M</text>`;
+    });
+
+    // Invisible hover columns
+    for (let yr = 1; yr <= 15; yr++) {
+      const x = xPos(yr);
+      const colW = pw / years;
+      svg += `<rect x="${x-colW/2}" y="${mt}" width="${colW}" height="${ph}" fill="transparent" style="cursor:crosshair"
+        onmousemove="window.__noiTip(event,${yr})" onmouseleave="window.__barHide()"/>`;
+    }
+
+    svg += '</svg>';
+    document.getElementById('noi-chart').innerHTML = svg;
+
+    window.__noiTip = (e, yr) => {
+      const vals = ['base','a','b','c'].map(k => {
+        const v = data.noi[k][yr-1];
+        return (v / 1e6).toFixed(2) + 'M DKK';
+      });
+      showTip(e, 'Year ' + yr, 'Base: ' + vals[0] + '\nA: ' + vals[1] + '\nB: ' + vals[2] + '\nC: ' + vals[3]);
+      ttValue.innerHTML = 'Base: ' + vals[0] + '<br>A: ' + vals[1] + '<br>B: ' + vals[2] + '<br>C: ' + vals[3];
+    };
+  })();
+
+  // ── Share price delta chart ──
+  (function() {
+    const W = 700, H = 200, ml = 60, mr = 80, mt = 10, mb = 50;
+    const pw = W - ml - mr, ph = H - mt - mb;
+    const max = 9000;
+    const barW = 22;
+    const items = [
+      { label: 'A: Maint. −25%', delta: 4279, total: 29258, color: colors.a },
+      { label: 'B: Impr. ×2', delta: 3581, total: 28560, color: colors.b },
+      { label: 'C: Both', delta: 7859, total: 32838, color: colors.c },
+    ];
+    const gap = pw / 3;
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">`;
+    // Gridlines
+    for (let v = 0; v <= 8000; v += 2000) {
+      const y = mt + ph - (v / max) * ph;
+      svg += `<line x1="${ml}" x2="${W-mr}" y1="${y}" y2="${y}" stroke="${colors.gridline}" stroke-width="1"/>`;
+      svg += `<text x="${ml-8}" y="${y+4}" text-anchor="end" fill="${colors.muted}" font-size="11">+${fmt(v)}</text>`;
+    }
+    svg += `<line x1="${ml}" x2="${W-mr}" y1="${mt+ph}" y2="${mt+ph}" stroke="${colors.baseline}" stroke-width="1"/>`;
+
+    items.forEach((d, i) => {
+      const cx = ml + gap * i + gap / 2;
+      const barH = (d.delta / max) * ph;
+      const y = mt + ph - barH;
+      svg += `<rect x="${cx-barW/2}" y="${y}" width="${barW}" height="${barH}" fill="${d.color}" rx="4" ry="4" style="cursor:pointer"
+        onmousemove="window.__shareTip(event,${i})" onmouseleave="window.__barHide()"/>`;
+      svg += `<text x="${cx}" y="${y-8}" text-anchor="middle" fill="${colors.secondary}" font-size="12" font-weight="600">+${fmt(d.delta)}</text>`;
+      svg += `<text x="${cx}" y="${mt+ph+18}" text-anchor="middle" fill="${colors.muted}" font-size="11">${['A','B','C'][i]}</text>`;
+      svg += `<text x="${cx}" y="${mt+ph+34}" text-anchor="middle" fill="${colors.muted}" font-size="10">${fmt(d.total)} DKK/m²</text>`;
+    });
+    svg += '</svg>';
+    document.getElementById('share-chart').innerHTML = svg;
+
+    window.__shareTip = (e, i) => {
+      showTip(e, items[i].label, 'Share price: ' + fmt(items[i].total) + ' DKK/m²\nΔ vs base: +' + fmt(items[i].delta) + ' DKK/m²');
+      ttValue.innerHTML = 'Share price: ' + fmt(items[i].total) + ' DKK/m²<br>Δ vs base: +' + fmt(items[i].delta) + ' DKK/m²';
+    };
+  })();
+
+})();
+</script>

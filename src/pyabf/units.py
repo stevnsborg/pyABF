@@ -34,6 +34,9 @@ class Unit:
         is_rental: True if the unit is rented out, False if owner-occupied
         fixed_rent: Fixed annual rent for rental units (DKK). If set (> 0)
             this overrides the rate-based calculation for rental units.
+        bfe: BFE number of the property the unit belongs to, if known.
+        bbr_id: The unit's BBR id, if known (set for units loaded from
+            OIS; see :mod:`pyabf.ois`).
         rate_per_sqm: Annual rate (DKK/m²/year) assigned by the owning
             cooperative. Read-only; not an ``__init__`` argument.
     """
@@ -44,6 +47,8 @@ class Unit:
     bathrooms: int = 1
     is_rental: bool = False
     fixed_rent: float = 0.0
+    bfe: int | None = None
+    bbr_id: str | None = None
     _rate_per_sqm: float = field(default=0.0, init=False, repr=False)
 
     @property

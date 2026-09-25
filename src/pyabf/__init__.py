@@ -14,6 +14,7 @@ Modules:
     tax         — Property tax (grundskyld) computation (2024+ rules)
     budget      — Budget tracking and balance-sheet import
     cooperative — HousingCooperative (the main class)
+    ois         — Load units from OIS.dk by BFE number
 """
 
 from .units import Unit, CooperativeUnit, CommercialUnit, Improvement
@@ -37,6 +38,7 @@ from .valuation import (
 )
 from .tax import compute_property_tax
 from .cooperative import HousingCooperative
+from .ois import OISClient, OISUnit, OISFloor, OISError, fetch_units, fetch_floors
 from .budget import (
     BudgetLineItem,
     BudgetCategory,
@@ -92,4 +94,11 @@ __all__ = [
     "CategoryType",
     "load_balance_sheet_csv",
     "parse_danish_number",
+    # OIS
+    "OISClient",
+    "OISUnit",
+    "OISFloor",
+    "OISError",
+    "fetch_units",
+    "fetch_floors",
 ]
