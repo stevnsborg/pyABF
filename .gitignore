@@ -178,3 +178,4 @@ cython_debug/
 .pypirc
 # Specific cooperative data (not part of the library)
 ABTR76/
+Claude-outputs/
