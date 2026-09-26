@@ -32,7 +32,7 @@ pytest
 | `pyabf.accounting` | `AccountEntry`, `AnnualReport`, `DEFAULT_NOTES` |
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
 | `pyabf.tax` | `compute_property_tax`: grundskyld under the 2024+ transition rules |
-| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `ValuationReport` |
+| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport` |
 | `pyabf.ois` | `OISClient`, `fetch_units`, `fetch_floors`: load a property's BBR units and floors (basements, roof floors) from OIS.dk by BFE number |
 
 All amounts are in DKK. Rates are fractions (`0.02` = 2 %).
@@ -172,6 +172,47 @@ True
 
 `ValuationReport(result, assumptions).to_text()` renders a full text report
 with the assumptions, NPV breakdown, cash-flow table and sensitivity grid.
+
+### Monte Carlo valuation
+
+`run_monte_carlo` draws the selected parameters from normal distributions
+around their base values and re-runs the DCF model for every draw. The
+default spread is 2.5 % of the value for amounts and 0.25 percentage
+points for rates (`*_rate`, `*_return`, `*_pct`, `*_fraction`), with 1000
+draws. Parameters are dotted paths into `ValuationAssumptions`.
+
+```python
+>>> from pyabf.valuation import run_monte_carlo, ParameterDistribution
+>>> mc = run_monte_carlo(assumptions, n_samples=200, seed=1, parameters=[
+...     "economic.required_real_return",                  # ±0.25 pp
+...     "rent.modernized_rent_per_sqm",                   # ±2.5 %
+...     ParameterDistribution("modernization.cost_per_sqm", std=1_000),
+... ])
+>>> mc.samples.shape             # one row per draw: inputs + outputs
+(200, 7)
+>>> list(mc.summary().columns)
+['base', 'mean', 'std', 'cv', 'p5', 'p25', 'p50', 'p75', 'p95']
+>>> mc.sensitivity().index[0]    # the parameter driving most of the spread
+'economic.required_real_return'
+
+```
+
+Store the assumptions on the cooperative to value it directly. Its
+`run_monte_carlo` also varies the loans' bond prices and returns the debt
+market value, equity and share price for every draw:
+
+```python
+>>> coop.valuation_assumptions = assumptions
+>>> coop.other_assets = 500_000
+>>> mc = coop.run_monte_carlo(n_samples=200, seed=1)
+>>> mc.base_values["share_price"] == coop.compute_share_price(coop.run_valuation())
+True
+>>> "loans.Loan 1.bond_price" in mc.samples
+True
+
+```
+
+See `ABTR1976/monte_carlo_example.py` for a worked example.
 
 ## License
 

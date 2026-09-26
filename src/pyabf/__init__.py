@@ -35,6 +35,9 @@ from .valuation import (
     CashFlowProjection,
     SensitivityGrid,
     run_sensitivity,
+    ParameterDistribution,
+    MonteCarloResult,
+    run_monte_carlo,
 )
 from .tax import compute_property_tax
 from .cooperative import HousingCooperative
@@ -82,6 +85,9 @@ __all__ = [
     "CashFlowProjection",
     "SensitivityGrid",
     "run_sensitivity",
+    "ParameterDistribution",
+    "MonteCarloResult",
+    "run_monte_carlo",
     # Tax
     "compute_property_tax",
     # Budget
