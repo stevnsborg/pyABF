@@ -11,6 +11,7 @@ Modules:
     dcf_model    — NPV engine with Gordon Growth terminal value
     sensitivity  — Two-dimensional what-if analysis grid
     report       — Human-readable report generation
+    monte_carlo  — Monte Carlo simulation of the valuation
 
 Quick start:
     >>> from pyabf.valuation import (
@@ -42,6 +43,15 @@ from .cash_flow import AnnualCashFlow, CashFlowProjection
 from .dcf_model import DCFModel, ValuationResult
 from .sensitivity import SensitivityGrid, run_sensitivity
 from .report import ValuationReport
+from .monte_carlo import (
+    ParameterDistribution,
+    MonteCarloResult,
+    run_monte_carlo,
+    DEFAULT_PARAMETERS,
+    DEFAULT_N_SAMPLES,
+    DEFAULT_REL_STD,
+    DEFAULT_RATE_ABS_STD,
+)
 
 # Deprecated: the original monolithic function is kept in _legacy.py so
 # that ``from pyabf.valuation import compute_net_present_value`` keeps
@@ -70,4 +80,12 @@ __all__ = [
     "run_sensitivity",
     # Report
     "ValuationReport",
+    # Monte Carlo
+    "ParameterDistribution",
+    "MonteCarloResult",
+    "run_monte_carlo",
+    "DEFAULT_PARAMETERS",
+    "DEFAULT_N_SAMPLES",
+    "DEFAULT_REL_STD",
+    "DEFAULT_RATE_ABS_STD",
 ]

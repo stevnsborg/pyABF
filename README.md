@@ -14,6 +14,7 @@ Requires Python 3.12+.
 
 ```bash
 pip install -e ".[dev]"
+pip install -e ".[plot]"   # optional: matplotlib for pyabf.plotting
 ```
 
 Run the tests (including the examples in this README):
@@ -28,11 +29,13 @@ pytest
 | --- | --- |
 | `pyabf.cooperative` | `HousingCooperative`: the main entry point that ties everything together |
 | `pyabf.units` | `Unit`, `CooperativeUnit`, `CommercialUnit`, `Improvement` |
+| `pyabf.shares` | `ShareCalculation`: property value + liquid assets − debt − buffer → share price per m² |
+| `pyabf.plotting` | Monte Carlo charts: share-value ranges per andel, cumulative curves (needs matplotlib) |
 | `pyabf.loan` | `Loan`: annuity loans with interest-only periods, contribution rate and bond price |
 | `pyabf.accounting` | `AccountEntry`, `AnnualReport`, `DEFAULT_NOTES` |
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
 | `pyabf.tax` | `compute_property_tax`: grundskyld under the 2024+ transition rules |
-| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `ValuationReport` |
+| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport` |
 | `pyabf.ois` | `OISClient`, `fetch_units`, `fetch_floors`: load a property's BBR units and floors (basements, roof floors) from OIS.dk by BFE number |
 
 All amounts are in DKK. Rates are fractions (`0.02` = 2 %).
@@ -172,6 +175,86 @@ True
 
 `ValuationReport(result, assumptions).to_text()` renders a full text report
 with the assumptions, NPV breakdown, cash-flow table and sensitivity grid.
+
+### Monte Carlo valuation
+
+`run_monte_carlo` draws the selected parameters from normal distributions
+around their base values and re-runs the DCF model for every draw. The
+default spread is 2.5 % of the value for amounts and 0.25 percentage
+points for rates (`*_rate`, `*_return`, `*_pct`, `*_fraction`), with 1000
+draws. Parameters are dotted paths into `ValuationAssumptions`.
+
+```python
+>>> from pyabf.valuation import run_monte_carlo, ParameterDistribution
+>>> mc = run_monte_carlo(assumptions, n_samples=200, seed=1, parameters=[
+...     "economic.required_real_return",                  # ±0.25 pp
+...     "rent.modernized_rent_per_sqm",                   # ±2.5 %
+...     ParameterDistribution("modernization.cost_per_sqm", std=1_000),
+... ])
+>>> mc.samples.shape             # one row per draw: inputs + outputs
+(200, 7)
+>>> list(mc.summary().columns)
+['base', 'mean', 'std', 'cv', 'p5', 'p25', 'p50', 'p75', 'p95']
+>>> mc.sensitivity().index[0]    # the parameter driving most of the spread
+'economic.required_real_return'
+
+```
+
+### From property value to share price
+
+Store the valuation inputs and the balance-sheet items on the
+cooperative. The share price is the equity (property value + liquid
+assets + other assets − mortgage debt − other liabilities) per m² of
+owner-occupied residential area. The debt is taken at market value
+(`debt_basis="market"`, the default) or at principal
+(`debt_basis="principal"`). A `share_price_buffer` is withheld from the
+equity before dividing: it stays in the cooperative but is not
+distributed to the andele.
+
+```python
+>>> coop.valuation_assumptions = assumptions
+>>> coop.liquid_assets = 500_000          # likvide beholdninger
+>>> calc = coop.share_calculation(coop.run_valuation())
+>>> calc.equity == calc.property_value + 500_000 - 5_000_000 * 0.90
+True
+>>> coop.share_price_buffer = 1_000_000   # withheld from the share price
+>>> calc = coop.share_calculation(coop.run_valuation())
+>>> calc.share_equity == calc.equity - 1_000_000
+True
+>>> list(coop.share_values().columns)     # one row per andel
+['area', 'price_per_sqm', 'share_value']
+
+```
+
+The cooperative's `run_monte_carlo` applies the same calculation to every
+draw, and also varies the loans' bond prices. `share_value_distribution`
+turns the sampled share price into the value of each andel:
+
+```python
+>>> mc = coop.run_monte_carlo(n_samples=200, seed=1)
+>>> mc.base_values["share_price"] == calc.price_per_sqm
+True
+>>> "loans.Loan 1.bond_price" in mc.samples
+True
+>>> list(coop.share_value_distribution(mc).columns)
+['area', 'base', 'mean', 'std', 'p5', 'p50', 'p95']
+
+```
+
+### Plots
+
+```python
+from pyabf.plotting import plot_share_value_ranges, plot_share_value_cdf
+
+plot_share_value_ranges(mc, coop)            # every andel, or e.g. [50, 75, 110] m²
+plot_share_value_cdf(mc, [62], threshold=1_000_000)  # chance a 62 m² andel is below 1M
+```
+
+The range chart shows each andel's 90 % and 50 % intervals, median and base
+case. The cumulative curve gives, for any amount, the share of simulations
+in which the andel is worth less.
+
+See `ABTR1976/monte_carlo_example.py` for a worked example.
 
 ## License
 

@@ -12,6 +12,10 @@ The cooperative sets two annual rates (DKK/m²/year):
 These are propagated to each unit and scaled by the unit's area.
 Rental units with a fixed_rent override the rate-based calculation.
 
+Store the valuation inputs in ``valuation_assumptions`` to value the
+cooperative (``run_valuation``, ``run_monte_carlo``) and compute the share
+price without passing them around.
+
 Example:
     >>> from pyabf import HousingCooperative, CooperativeUnit, Loan
     >>> coop = HousingCooperative(
@@ -29,9 +33,13 @@ Contains:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import numpy as np
+import pandas as pd
 
 from .units import Unit, CooperativeUnit, CommercialUnit
 from .loan import Loan
@@ -39,13 +47,32 @@ from .accounting import AnnualReport
 from .budget import Budget, BudgetTracker, AccountMapping
 from .tax import compute_property_tax
 from .ois import OISClient, fetch_units
+from .shares import DEBT_BASES, DebtBasis, ShareCalculation
 from .valuation import (
+    PropertyDescription,
     ValuationAssumptions,
     DCFModel,
     ValuationResult,
     ValuationReport,
     run_sensitivity,
 )
+from .valuation.monte_carlo import (
+    DEFAULT_N_SAMPLES,
+    DEFAULT_RATE_ABS_STD,
+    DEFAULT_REL_STD,
+    MonteCarloResult,
+    ParameterDistribution,
+    ParameterSpec,
+    VALUATION_OUTPUTS,
+    draw_samples,
+    normalize_parameters,
+    resolve_parameters,
+    simulate_valuations,
+)
+
+#: Loan attributes that can be varied in :meth:`HousingCooperative.run_monte_carlo`
+#: (the ones that determine the debt's market value).
+MONTE_CARLO_LOAN_PARAMETERS = ("principal", "bond_price")
 
 
 @dataclass
@@ -78,6 +105,23 @@ class HousingCooperative:
             budget line-item keys.  Shared across all budgets.
         bfe_numbers: BFE numbers of the properties the cooperative owns.
             Used by :meth:`add_units_from_ois` to load units from OIS.dk.
+        valuation_assumptions: The cooperative's DCF valuation inputs
+            (valuarvurdering).  Used by the valuation methods when no
+            assumptions are passed.
+        liquid_assets: Cash and bank holdings (likvide beholdninger, DKK).
+        other_assets: Other assets besides the property and cash (DKK),
+            e.g. receivables and prepayments.
+        other_liabilities: Liabilities besides mortgage debt (DKK), e.g.
+            creditors and deposits.
+        debt_basis: How the loans enter the share price: ``"market"``
+            (kursværdi, principal × bond price; the default) or
+            ``"principal"`` (nominal outstanding balance).
+        share_price_buffer: Equity withheld when setting the share price
+            (DKK), a safety margin that is not distributed to the andele.
+
+    The share price is computed by :meth:`share_calculation`: property
+    value + liquid assets + other assets − mortgage debt − other
+    liabilities − buffer, divided by the owner-occupied residential area.
     """
 
     name: str
@@ -89,9 +133,19 @@ class HousingCooperative:
     budgets: dict[str, Budget] = field(default_factory=dict)
     account_mapping: AccountMapping = field(default_factory=AccountMapping)
     bfe_numbers: list[int] = field(default_factory=list)
+    valuation_assumptions: ValuationAssumptions | None = None
+    liquid_assets: float = 0.0
+    other_assets: float = 0.0
+    other_liabilities: float = 0.0
+    debt_basis: DebtBasis = "market"
+    share_price_buffer: float = 0.0
 
     def __post_init__(self) -> None:
         """Propagate rates to all units after initialization."""
+        if self.debt_basis not in DEBT_BASES:
+            raise ValueError(f"debt_basis must be one of {DEBT_BASES}.")
+        if self.share_price_buffer < 0:
+            raise ValueError("share_price_buffer must be >= 0.")
         self._propagate_rates()
 
     @classmethod
@@ -331,6 +385,17 @@ class HousingCooperative:
         """Total market value of all loans (DKK)."""
         return sum(loan.market_value for loan in self.loans)
 
+    @property
+    def mortgage_debt(self) -> float:
+        """The loans valued per ``debt_basis`` (DKK).
+
+        Market value (principal × bond price) for ``"market"``, the
+        outstanding principal for ``"principal"``.
+        """
+        if self.debt_basis == "principal":
+            return self.total_debt
+        return self.total_debt_market_value
+
     def debt_after_years(self, years: int) -> float:
         """Total remaining debt after a given number of years.
 
@@ -502,35 +567,72 @@ class HousingCooperative:
     # Valuation
     # ═══════════════════════════════════════════════════════════════════
 
+    def property_description(self, **kwargs: float) -> PropertyDescription:
+        """Build a valuation ``PropertyDescription`` from the units.
+
+        Total, residential and commercial area are summed from ``units``.
+        Areas that are not units (basement, roof, land) can be passed as
+        keyword arguments, which also override the summed areas.
+
+        Args:
+            **kwargs: ``PropertyDescription`` fields to set or override.
+
+        Returns:
+            The property description.
+        """
+        fields = {
+            "total_building_area": self.total_area,
+            "residential_area": self.residential_area,
+            "commercial_area": self.commercial_area,
+        }
+        fields.update(kwargs)
+        return PropertyDescription(**fields)
+
+    def _resolve_assumptions(
+        self, assumptions: ValuationAssumptions | None
+    ) -> ValuationAssumptions:
+        """The given assumptions, or the stored ``valuation_assumptions``."""
+        if assumptions is not None:
+            return assumptions
+        if self.valuation_assumptions is None:
+            raise ValueError(
+                f"{self.name} has no valuation_assumptions; pass assumptions "
+                "or set coop.valuation_assumptions."
+            )
+        return self.valuation_assumptions
+
     def run_valuation(
         self,
-        assumptions: ValuationAssumptions,
+        assumptions: ValuationAssumptions | None = None,
     ) -> ValuationResult:
         """Run a DCF property valuation.
 
         Args:
-            assumptions: Complete set of valuation inputs.
+            assumptions: Complete set of valuation inputs.  Defaults to
+                ``valuation_assumptions``.
 
         Returns:
             A ValuationResult with the computed property value.
         """
-        model = DCFModel(assumptions=assumptions)
+        model = DCFModel(assumptions=self._resolve_assumptions(assumptions))
         return model.compute()
 
     def run_valuation_with_report(
         self,
-        assumptions: ValuationAssumptions,
+        assumptions: ValuationAssumptions | None = None,
         include_sensitivity: bool = True,
     ) -> tuple[ValuationResult, ValuationReport]:
         """Run a valuation and generate a formatted report.
 
         Args:
-            assumptions: Complete set of valuation inputs.
+            assumptions: Complete set of valuation inputs.  Defaults to
+                ``valuation_assumptions``.
             include_sensitivity: If True, include a sensitivity analysis.
 
         Returns:
             Tuple of (ValuationResult, ValuationReport).
         """
+        assumptions = self._resolve_assumptions(assumptions)
         model = DCFModel(assumptions=assumptions)
         result = model.compute()
         sensitivity = (
@@ -538,6 +640,147 @@ class HousingCooperative:
         )
         report = ValuationReport(result, assumptions, sensitivity)
         return result, report
+
+    def run_monte_carlo(
+        self,
+        assumptions: ValuationAssumptions | None = None,
+        parameters: ParameterSpec | None = None,
+        n_samples: int = DEFAULT_N_SAMPLES,
+        seed: int | np.random.Generator | None = None,
+        loan_parameters: Iterable[str] | Mapping[str, float | None] | None = None,
+        liquid_assets: float | None = None,
+        other_assets: float | None = None,
+        other_liabilities: float | None = None,
+        buffer: float | None = None,
+        rel_std: float = DEFAULT_REL_STD,
+        rate_abs_std: float = DEFAULT_RATE_ABS_STD,
+    ) -> MonteCarloResult:
+        """Monte Carlo simulation of the valuation and the share price.
+
+        The selected valuation parameters (and, per loan, the selected
+        loan parameters) are drawn independently from normal
+        distributions: std 2.5 % of the base value for amounts and 0.25
+        percentage points for rates, unless set otherwise.  For every
+        draw the property value is computed and then turned into a share
+        price exactly as in :meth:`share_calculation`: add liquid and
+        other assets, subtract the mortgage debt (per ``debt_basis``),
+        other liabilities and the buffer, divide by the owner-occupied
+        residential area.
+        Use :meth:`share_value_distribution` for the value per andel.
+
+        Args:
+            assumptions: Base-case valuation inputs.  Defaults to
+                ``valuation_assumptions``.
+            parameters: Valuation parameters to vary (see
+                :func:`pyabf.valuation.run_monte_carlo`).  ``None`` uses
+                the defaults.
+            n_samples: Number of draws (default 1000).
+            seed: Seed or ``numpy.random.Generator`` for reproducibility.
+            loan_parameters: Loan attributes to vary for every loan:
+                ``"bond_price"`` and/or ``"principal"``, or a mapping
+                ``{attribute: std}``.  ``None`` (default) varies the bond
+                price when ``debt_basis`` is ``"market"`` and nothing
+                otherwise; an empty list keeps the loans fixed.  Sampled
+                columns are named ``"loans.<loan name>.<attribute>"``.
+            liquid_assets: Defaults to ``self.liquid_assets``.
+            other_assets: Defaults to ``self.other_assets``.
+            other_liabilities: Defaults to ``self.other_liabilities``.
+            buffer: Defaults to ``self.share_price_buffer``.
+            rel_std: Default relative std for amounts.
+            rate_abs_std: Default absolute std for rates.
+
+        Returns:
+            A :class:`~pyabf.valuation.MonteCarloResult` whose ``samples``
+            hold, besides the valuation outputs, ``mortgage_debt``,
+            ``equity``, ``share_equity`` (equity − buffer) and
+            ``share_price`` (DKK/m²).
+        """
+        assumptions = self._resolve_assumptions(assumptions)
+        base = self.run_valuation(assumptions)
+        base_calc = self.share_calculation(
+            base, liquid_assets, other_assets, other_liabilities, buffer)
+        if loan_parameters is None:
+            loan_parameters = (
+                ("bond_price",) if self.debt_basis == "market" else ())
+        rng = (seed if isinstance(seed, np.random.Generator)
+               else np.random.default_rng(seed))
+
+        valuation_dists = resolve_parameters(
+            assumptions, parameters, rel_std, rate_abs_std)
+        loan_dists = self._loan_distributions(
+            loan_parameters, rel_std, rate_abs_std)
+        dists = valuation_dists + [d for _, _, d in loan_dists]
+        paths = [d.path for d in dists]
+        if len(set(paths)) != len(paths):
+            raise ValueError("Duplicate parameter; loan names must be unique.")
+
+        samples = draw_samples(dists, n_samples, rng)
+        outputs = simulate_valuations(
+            assumptions, samples[[d.path for d in valuation_dists]])
+
+        debt = np.zeros(n_samples)
+        for loan in self.loans:
+            sampled = {attr: samples[d.path].to_numpy()
+                       for lo, attr, d in loan_dists if lo is loan}
+            principal = sampled.get("principal", loan.principal)
+            if self.debt_basis == "market":
+                debt += principal * sampled.get("bond_price", loan.bond_price) / 100
+            else:
+                debt += principal
+        outputs["mortgage_debt"] = debt
+        outputs["equity"] = (
+            outputs["total_value"] + base_calc.liquid_assets
+            + base_calc.other_assets - debt - base_calc.other_liabilities
+        )
+        outputs["share_equity"] = outputs["equity"] - base_calc.buffer
+        area = base_calc.owned_residential_area
+        outputs["share_price"] = outputs["share_equity"] / area if area else 0.0
+
+        base_values = {name: float(getattr(base, name))
+                       for name in VALUATION_OUTPUTS}
+        base_values["mortgage_debt"] = base_calc.mortgage_debt
+        base_values["equity"] = base_calc.equity
+        base_values["share_equity"] = base_calc.share_equity
+        base_values["share_price"] = base_calc.price_per_sqm
+
+        return MonteCarloResult(
+            parameters=tuple(dists),
+            samples=pd.concat([samples, outputs], axis=1),
+            base_values=base_values,
+            n_samples=n_samples,
+            seed=seed if isinstance(seed, int) else None,
+        )
+
+    def _loan_distributions(
+        self,
+        loan_parameters: Iterable[str] | Mapping[str, float | None] | None,
+        rel_std: float,
+        rate_abs_std: float,
+    ) -> list[tuple[Loan, str, ParameterDistribution]]:
+        """Resolved ``(loan, attribute, distribution)`` for every loan."""
+        if not loan_parameters:
+            return []
+        attrs = normalize_parameters(loan_parameters)
+        allowed = (MONTE_CARLO_LOAN_PARAMETERS if self.debt_basis == "market"
+                   else ("principal",))
+        for d in attrs:
+            if d.path not in allowed:
+                raise ValueError(
+                    f"Loan parameter '{d.path}' does not affect the mortgage "
+                    f"debt with debt_basis='{self.debt_basis}'; use one of "
+                    f"{allowed}."
+                )
+        out = []
+        for loan in self.loans:
+            for d in attrs:
+                resolved = d.resolve(
+                    float(getattr(loan, d.path)), rel_std, rate_abs_std)
+                out.append((loan, d.path, ParameterDistribution(
+                    path=f"loans.{loan.name}.{d.path}",
+                    mean=resolved.mean, std=resolved.std,
+                    is_rate=resolved.is_rate,
+                )))
+        return out
 
     # ═══════════════════════════════════════════════════════════════════
     # Tax
@@ -612,43 +855,82 @@ class HousingCooperative:
     # Share value
     # ═══════════════════════════════════════════════════════════════════
 
+    def share_calculation(
+        self,
+        property_value: float | ValuationResult,
+        liquid_assets: float | None = None,
+        other_assets: float | None = None,
+        other_liabilities: float | None = None,
+        buffer: float | None = None,
+    ) -> ShareCalculation:
+        """The balance from property value to share price (andelsværdi).
+
+        Equity = property value + liquid assets + other assets
+               − mortgage debt − other liabilities;
+        share price = (equity − buffer) / owner-occupied residential area.
+
+        The mortgage debt is valued per ``debt_basis``.  The share price
+        is based on the owner-occupied residential area since only those
+        units carry a cooperative share.
+
+        Args:
+            property_value: The property value (DKK), or a
+                ``ValuationResult`` whose ``total_value`` is used.
+            liquid_assets: Defaults to ``self.liquid_assets``.
+            other_assets: Defaults to ``self.other_assets``.
+            other_liabilities: Defaults to ``self.other_liabilities``.
+            buffer: Equity withheld from the share price.  Defaults to
+                ``self.share_price_buffer``.
+
+        Returns:
+            A :class:`~pyabf.shares.ShareCalculation`; ``.price_per_sqm``
+            is the share price, ``.to_series()`` shows the whole balance.
+        """
+        if isinstance(property_value, ValuationResult):
+            property_value = property_value.total_value
+        return ShareCalculation(
+            property_value=float(property_value),
+            liquid_assets=(self.liquid_assets if liquid_assets is None
+                           else liquid_assets),
+            other_assets=(self.other_assets if other_assets is None
+                          else other_assets),
+            mortgage_debt=self.mortgage_debt,
+            other_liabilities=(self.other_liabilities if other_liabilities
+                               is None else other_liabilities),
+            owned_residential_area=self.owned_residential_area,
+            debt_basis=self.debt_basis,
+            buffer=self.share_price_buffer if buffer is None else buffer,
+        )
+
     def compute_share_price(
         self,
-        property_value: float,
-        other_assets: float = 0.0,
-        other_liabilities: float = 0.0,
+        property_value: float | ValuationResult,
+        other_assets: float | None = None,
+        other_liabilities: float | None = None,
+        liquid_assets: float | None = None,
+        buffer: float | None = None,
     ) -> float:
-        """Compute the share price per square meter.
+        """Compute the share price per square meter (DKK/m²).
 
-        The share price is based on the owner-occupied residential area,
-        since only those units carry a cooperative share.
-
-        Formula:
-            Equity = Property value + Other assets
-                   - Debt (market value) - Other liabilities
-            Share price = Equity / Owner-occupied residential area
-
-        Debt is taken at market value (``Loan.market_value``, i.e.
-        principal × bond price).  Returns 0.0 when there is no
+        Shorthand for ``share_calculation(...).price_per_sqm``; see
+        :meth:`share_calculation`.  Returns 0.0 when there is no
         owner-occupied residential area.
 
         Args:
-            property_value: The assessed property value (DKK).
-            other_assets: Other assets besides the property (DKK).
-            other_liabilities: Other liabilities besides mortgage debt (DKK).
+            property_value: The property value (DKK), or a
+                ``ValuationResult``.
+            other_assets: Defaults to ``self.other_assets``.
+            other_liabilities: Defaults to ``self.other_liabilities``.
+            liquid_assets: Defaults to ``self.liquid_assets``.
+            buffer: Defaults to ``self.share_price_buffer``.
 
         Returns:
             Share price in DKK/m².
         """
-        equity = (
-            property_value
-            + other_assets
-            - self.total_debt_market_value
-            - other_liabilities
-        )
-        if self.owned_residential_area == 0:
-            return 0.0
-        return equity / self.owned_residential_area
+        return self.share_calculation(
+            property_value, liquid_assets, other_assets, other_liabilities,
+            buffer,
+        ).price_per_sqm
 
     def update_share_values(self, share_price: float) -> None:
         """Update share values for all owner-occupied residential units.
@@ -665,9 +947,11 @@ class HousingCooperative:
 
     def compute_and_update_shares(
         self,
-        property_value: float,
-        other_assets: float = 0.0,
-        other_liabilities: float = 0.0,
+        property_value: float | ValuationResult,
+        other_assets: float | None = None,
+        other_liabilities: float | None = None,
+        liquid_assets: float | None = None,
+        buffer: float | None = None,
     ) -> float:
         """Compute the share price and update all cooperative units.
 
@@ -675,18 +959,80 @@ class HousingCooperative:
         ``update_share_values``.
 
         Args:
-            property_value: The assessed property value (DKK).
-            other_assets: Other assets besides the property (DKK).
-            other_liabilities: Other liabilities besides mortgage debt (DKK).
+            property_value: The property value (DKK), or a
+                ``ValuationResult``.
+            other_assets: Defaults to ``self.other_assets``.
+            other_liabilities: Defaults to ``self.other_liabilities``.
+            liquid_assets: Defaults to ``self.liquid_assets``.
+            buffer: Defaults to ``self.share_price_buffer``.
 
         Returns:
             The computed share price in DKK/m².
         """
         price = self.compute_share_price(
-            property_value, other_assets, other_liabilities
+            property_value, other_assets, other_liabilities, liquid_assets,
+            buffer,
         )
         self.update_share_values(price)
         return price
+
+    def share_values(
+        self,
+        property_value: float | ValuationResult | None = None,
+        **balance: float | None,
+    ) -> pd.DataFrame:
+        """Share value of every andel (owner-occupied residential unit).
+
+        Args:
+            property_value: The property value (DKK) or a
+                ``ValuationResult``.  Defaults to a valuation with the
+                stored ``valuation_assumptions``.
+            **balance: ``liquid_assets``, ``other_assets``,
+                ``other_liabilities`` or ``buffer`` overrides for
+                :meth:`share_calculation`.
+
+        Returns:
+            DataFrame indexed by address with ``area``,
+            ``price_per_sqm`` and ``share_value`` (DKK).
+        """
+        if property_value is None:
+            property_value = self.run_valuation()
+        price = self.share_calculation(property_value, **balance).price_per_sqm
+        return pd.DataFrame(
+            [{"address": u.address, "area": u.area, "price_per_sqm": price,
+              "share_value": price * u.area} for u in self.owned_residential],
+            columns=["address", "area", "price_per_sqm", "share_value"],
+        ).set_index("address")
+
+    def share_value_distribution(
+        self,
+        mc: MonteCarloResult,
+        percentiles: Iterable[float] = (0.05, 0.5, 0.95),
+    ) -> pd.DataFrame:
+        """Share value per andel from a Monte Carlo run.
+
+        Scales the sampled ``share_price`` by each owner-occupied
+        residential unit's area.
+
+        Args:
+            mc: Result of :meth:`run_monte_carlo`.
+            percentiles: Percentiles to include, as fractions.
+
+        Returns:
+            DataFrame indexed by address with ``area``, ``base``,
+            ``mean``, ``std`` and one column per percentile (``p5``, ...),
+            all in DKK.
+        """
+        price = mc.samples["share_price"]
+        base = mc.base_values["share_price"]
+        stats = {"base": base, "mean": price.mean(), "std": price.std()}
+        stats.update({f"p{p * 100:g}": price.quantile(p) for p in percentiles})
+        rows = []
+        for u in self.owned_residential:
+            row = {"address": u.address, "area": u.area}
+            row.update({k: v * u.area for k, v in stats.items()})
+            rows.append(row)
+        return pd.DataFrame(rows).set_index("address")
 
     # ═══════════════════════════════════════════════════════════════════
     # Summary
@@ -713,6 +1059,9 @@ class HousingCooperative:
             "total_annual_income": self.total_annual_income,
             "total_debt": self.total_debt,
             "total_debt_market_value": self.total_debt_market_value,
+            "debt_basis": self.debt_basis,
+            "liquid_assets": self.liquid_assets,
+            "share_price_buffer": self.share_price_buffer,
             "num_loans": len(self.loans),
             "num_annual_reports": len(self.annual_reports),
             "num_budgets": len(self.budgets),
