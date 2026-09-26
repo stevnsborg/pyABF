@@ -16,6 +16,7 @@ Modules:
     shares      — ShareCalculation (property value → share price)
     cooperative — HousingCooperative (the main class)
     ois         — Load units from OIS.dk by BFE number
+    project     — ProjectPlan (project budget paid monthly → improvements)
 """
 
 from .units import Unit, CooperativeUnit, CommercialUnit, Improvement
@@ -43,6 +44,7 @@ from .valuation import (
 from .tax import compute_property_tax
 from .shares import ShareCalculation
 from .cooperative import HousingCooperative
+from .project import ProjectPlan
 from .ois import OISClient, OISUnit, OISFloor, OISError, fetch_units, fetch_floors
 from .budget import (
     BudgetLineItem,
@@ -91,6 +93,8 @@ __all__ = [
     "ParameterDistribution",
     "MonteCarloResult",
     "run_monte_carlo",
+    # Projects
+    "ProjectPlan",
     # Tax
     "compute_property_tax",
     # Budget

@@ -36,6 +36,7 @@ pytest
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
 | `pyabf.tax` | `compute_property_tax`: grundskyld under the 2024+ transition rules |
 | `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport` |
+| `pyabf.project` | `ProjectPlan`: a project budget paid monthly over its duration; a share of it is added to the valuation's improvements |
 | `pyabf.ois` | `OISClient`, `fetch_units`, `fetch_floors`: load a property's BBR units and floors (basements, roof floors) from OIS.dk by BFE number |
 
 All amounts are in DKK. Rates are fractions (`0.02` = 2 %).
@@ -175,6 +176,38 @@ True
 
 `ValuationReport(result, assumptions).to_text()` renders a full text report
 with the assumptions, NPV breakdown, cash-flow table and sensitivity grid.
+
+### Project plans
+
+A `ProjectPlan` has a budget and a duration in months. The cost is paid in
+equal monthly amounts from the start month. `improvement_fraction` is the
+share of the cost that counts as an improvement: `add_to_valuation` adds
+one `ImprovementAllowance` per calendar year (the amount paid that year) to
+the valuation's improvements.
+
+```python
+>>> from pyabf import ProjectPlan
+>>> plan = ProjectPlan("New windows", budget=2_400_000, duration_months=18,
+...                    start_year=2026, start_month=10,
+...                    improvement_fraction=0.30, yield_rate=0.05)
+>>> round(plan.monthly_payment), plan.improvement_value
+(133333, 720000.0)
+>>> plan.end_year, plan.end_month
+(2028, 3)
+>>> annual = plan.annual_payments()        # summed per calendar year
+>>> annual["months"].to_dict()
+{2026: 3, 2027: 12, 2028: 3}
+>>> annual["improvement"].round().to_dict()
+{2026: 120000.0, 2027: 480000.0, 2028: 120000.0}
+>>> plan.add_to_valuation(assumptions)
+>>> [imp.name for imp in assumptions.improvements]
+['New windows (2026)', 'New windows (2027)', 'New windows (2028)']
+>>> round(assumptions.total_improvement_allowance)   # 720,000 × 5 %
+36000
+
+```
+
+`payment_schedule()` gives the month-by-month payments.
 
 ### Monte Carlo valuation
 
