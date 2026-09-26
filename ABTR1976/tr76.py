@@ -19,6 +19,8 @@ Placeholders — replace with the real figures:
     - liquid_assets / other_liabilities: from the scenario analysis
       (2.5M other assets, taken here as liquid holdings, and 0.5M other
       liabilities).  Use the latest annual report's balance sheet.
+
+Buffer: 40M DKK of the equity is withheld when setting the share price.
 """
 
 from __future__ import annotations
@@ -91,4 +93,5 @@ def build_tr76() -> HousingCooperative:
         liquid_assets=2_500_000,     # likvide beholdninger
         other_liabilities=500_000,
         debt_basis="market",         # loans at kursværdi
+        share_price_buffer=40_000_000,  # withheld from the share price
     )

@@ -116,10 +116,12 @@ class HousingCooperative:
         debt_basis: How the loans enter the share price: ``"market"``
             (kursværdi, principal × bond price; the default) or
             ``"principal"`` (nominal outstanding balance).
+        share_price_buffer: Equity withheld when setting the share price
+            (DKK), a safety margin that is not distributed to the andele.
 
     The share price is computed by :meth:`share_calculation`: property
     value + liquid assets + other assets − mortgage debt − other
-    liabilities, divided by the owner-occupied residential area.
+    liabilities − buffer, divided by the owner-occupied residential area.
     """
 
     name: str
@@ -136,11 +138,14 @@ class HousingCooperative:
     other_assets: float = 0.0
     other_liabilities: float = 0.0
     debt_basis: DebtBasis = "market"
+    share_price_buffer: float = 0.0
 
     def __post_init__(self) -> None:
         """Propagate rates to all units after initialization."""
         if self.debt_basis not in DEBT_BASES:
             raise ValueError(f"debt_basis must be one of {DEBT_BASES}.")
+        if self.share_price_buffer < 0:
+            raise ValueError("share_price_buffer must be >= 0.")
         self._propagate_rates()
 
     @classmethod
@@ -646,6 +651,7 @@ class HousingCooperative:
         liquid_assets: float | None = None,
         other_assets: float | None = None,
         other_liabilities: float | None = None,
+        buffer: float | None = None,
         rel_std: float = DEFAULT_REL_STD,
         rate_abs_std: float = DEFAULT_RATE_ABS_STD,
     ) -> MonteCarloResult:
@@ -657,8 +663,9 @@ class HousingCooperative:
         percentage points for rates, unless set otherwise.  For every
         draw the property value is computed and then turned into a share
         price exactly as in :meth:`share_calculation`: add liquid and
-        other assets, subtract the mortgage debt (per ``debt_basis``) and
-        other liabilities, divide by the owner-occupied residential area.
+        other assets, subtract the mortgage debt (per ``debt_basis``),
+        other liabilities and the buffer, divide by the owner-occupied
+        residential area.
         Use :meth:`share_value_distribution` for the value per andel.
 
         Args:
@@ -678,18 +685,20 @@ class HousingCooperative:
             liquid_assets: Defaults to ``self.liquid_assets``.
             other_assets: Defaults to ``self.other_assets``.
             other_liabilities: Defaults to ``self.other_liabilities``.
+            buffer: Defaults to ``self.share_price_buffer``.
             rel_std: Default relative std for amounts.
             rate_abs_std: Default absolute std for rates.
 
         Returns:
             A :class:`~pyabf.valuation.MonteCarloResult` whose ``samples``
             hold, besides the valuation outputs, ``mortgage_debt``,
-            ``equity`` and ``share_price`` (DKK/m²).
+            ``equity``, ``share_equity`` (equity − buffer) and
+            ``share_price`` (DKK/m²).
         """
         assumptions = self._resolve_assumptions(assumptions)
         base = self.run_valuation(assumptions)
         base_calc = self.share_calculation(
-            base, liquid_assets, other_assets, other_liabilities)
+            base, liquid_assets, other_assets, other_liabilities, buffer)
         if loan_parameters is None:
             loan_parameters = (
                 ("bond_price",) if self.debt_basis == "market" else ())
@@ -723,13 +732,15 @@ class HousingCooperative:
             outputs["total_value"] + base_calc.liquid_assets
             + base_calc.other_assets - debt - base_calc.other_liabilities
         )
+        outputs["share_equity"] = outputs["equity"] - base_calc.buffer
         area = base_calc.owned_residential_area
-        outputs["share_price"] = outputs["equity"] / area if area else 0.0
+        outputs["share_price"] = outputs["share_equity"] / area if area else 0.0
 
         base_values = {name: float(getattr(base, name))
                        for name in VALUATION_OUTPUTS}
         base_values["mortgage_debt"] = base_calc.mortgage_debt
         base_values["equity"] = base_calc.equity
+        base_values["share_equity"] = base_calc.share_equity
         base_values["share_price"] = base_calc.price_per_sqm
 
         return MonteCarloResult(
@@ -850,12 +861,13 @@ class HousingCooperative:
         liquid_assets: float | None = None,
         other_assets: float | None = None,
         other_liabilities: float | None = None,
+        buffer: float | None = None,
     ) -> ShareCalculation:
         """The balance from property value to share price (andelsværdi).
 
         Equity = property value + liquid assets + other assets
                − mortgage debt − other liabilities;
-        share price = equity / owner-occupied residential area.
+        share price = (equity − buffer) / owner-occupied residential area.
 
         The mortgage debt is valued per ``debt_basis``.  The share price
         is based on the owner-occupied residential area since only those
@@ -867,6 +879,8 @@ class HousingCooperative:
             liquid_assets: Defaults to ``self.liquid_assets``.
             other_assets: Defaults to ``self.other_assets``.
             other_liabilities: Defaults to ``self.other_liabilities``.
+            buffer: Equity withheld from the share price.  Defaults to
+                ``self.share_price_buffer``.
 
         Returns:
             A :class:`~pyabf.shares.ShareCalculation`; ``.price_per_sqm``
@@ -885,6 +899,7 @@ class HousingCooperative:
                                is None else other_liabilities),
             owned_residential_area=self.owned_residential_area,
             debt_basis=self.debt_basis,
+            buffer=self.share_price_buffer if buffer is None else buffer,
         )
 
     def compute_share_price(
@@ -893,6 +908,7 @@ class HousingCooperative:
         other_assets: float | None = None,
         other_liabilities: float | None = None,
         liquid_assets: float | None = None,
+        buffer: float | None = None,
     ) -> float:
         """Compute the share price per square meter (DKK/m²).
 
@@ -906,12 +922,14 @@ class HousingCooperative:
             other_assets: Defaults to ``self.other_assets``.
             other_liabilities: Defaults to ``self.other_liabilities``.
             liquid_assets: Defaults to ``self.liquid_assets``.
+            buffer: Defaults to ``self.share_price_buffer``.
 
         Returns:
             Share price in DKK/m².
         """
         return self.share_calculation(
-            property_value, liquid_assets, other_assets, other_liabilities
+            property_value, liquid_assets, other_assets, other_liabilities,
+            buffer,
         ).price_per_sqm
 
     def update_share_values(self, share_price: float) -> None:
@@ -933,6 +951,7 @@ class HousingCooperative:
         other_assets: float | None = None,
         other_liabilities: float | None = None,
         liquid_assets: float | None = None,
+        buffer: float | None = None,
     ) -> float:
         """Compute the share price and update all cooperative units.
 
@@ -945,12 +964,14 @@ class HousingCooperative:
             other_assets: Defaults to ``self.other_assets``.
             other_liabilities: Defaults to ``self.other_liabilities``.
             liquid_assets: Defaults to ``self.liquid_assets``.
+            buffer: Defaults to ``self.share_price_buffer``.
 
         Returns:
             The computed share price in DKK/m².
         """
         price = self.compute_share_price(
-            property_value, other_assets, other_liabilities, liquid_assets
+            property_value, other_assets, other_liabilities, liquid_assets,
+            buffer,
         )
         self.update_share_values(price)
         return price
@@ -966,8 +987,8 @@ class HousingCooperative:
             property_value: The property value (DKK) or a
                 ``ValuationResult``.  Defaults to a valuation with the
                 stored ``valuation_assumptions``.
-            **balance: ``liquid_assets``, ``other_assets`` or
-                ``other_liabilities`` overrides for
+            **balance: ``liquid_assets``, ``other_assets``,
+                ``other_liabilities`` or ``buffer`` overrides for
                 :meth:`share_calculation`.
 
         Returns:
@@ -1040,6 +1061,7 @@ class HousingCooperative:
             "total_debt_market_value": self.total_debt_market_value,
             "debt_basis": self.debt_basis,
             "liquid_assets": self.liquid_assets,
+            "share_price_buffer": self.share_price_buffer,
             "num_loans": len(self.loans),
             "num_annual_reports": len(self.annual_reports),
             "num_budgets": len(self.budgets),

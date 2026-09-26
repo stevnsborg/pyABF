@@ -14,6 +14,7 @@ Requires Python 3.12+.
 
 ```bash
 pip install -e ".[dev]"
+pip install -e ".[plot]"   # optional: matplotlib for pyabf.plotting
 ```
 
 Run the tests (including the examples in this README):
@@ -28,7 +29,8 @@ pytest
 | --- | --- |
 | `pyabf.cooperative` | `HousingCooperative`: the main entry point that ties everything together |
 | `pyabf.units` | `Unit`, `CooperativeUnit`, `CommercialUnit`, `Improvement` |
-| `pyabf.shares` | `ShareCalculation`: property value + liquid assets − debt → equity → share price per m² |
+| `pyabf.shares` | `ShareCalculation`: property value + liquid assets − debt − buffer → share price per m² |
+| `pyabf.plotting` | Monte Carlo charts: share-value ranges per andel, cumulative curves (needs matplotlib) |
 | `pyabf.loan` | `Loan`: annuity loans with interest-only periods, contribution rate and bond price |
 | `pyabf.accounting` | `AccountEntry`, `AnnualReport`, `DEFAULT_NOTES` |
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
@@ -205,13 +207,19 @@ cooperative. The share price is the equity (property value + liquid
 assets + other assets − mortgage debt − other liabilities) per m² of
 owner-occupied residential area. The debt is taken at market value
 (`debt_basis="market"`, the default) or at principal
-(`debt_basis="principal"`).
+(`debt_basis="principal"`). A `share_price_buffer` is withheld from the
+equity before dividing: it stays in the cooperative but is not
+distributed to the andele.
 
 ```python
 >>> coop.valuation_assumptions = assumptions
 >>> coop.liquid_assets = 500_000          # likvide beholdninger
 >>> calc = coop.share_calculation(coop.run_valuation())
 >>> calc.equity == calc.property_value + 500_000 - 5_000_000 * 0.90
+True
+>>> coop.share_price_buffer = 1_000_000   # withheld from the share price
+>>> calc = coop.share_calculation(coop.run_valuation())
+>>> calc.share_equity == calc.equity - 1_000_000
 True
 >>> list(coop.share_values().columns)     # one row per andel
 ['area', 'price_per_sqm', 'share_value']
@@ -232,6 +240,19 @@ True
 ['area', 'base', 'mean', 'std', 'p5', 'p50', 'p95']
 
 ```
+
+### Plots
+
+```python
+from pyabf.plotting import plot_share_value_ranges, plot_share_value_cdf
+
+plot_share_value_ranges(mc, coop)            # every andel, or e.g. [50, 75, 110] m²
+plot_share_value_cdf(mc, [62], threshold=1_000_000)  # chance a 62 m² andel is below 1M
+```
+
+The range chart shows each andel's 90 % and 50 % intervals, median and base
+case. The cumulative curve gives, for any amount, the share of simulations
+in which the andel is worth less.
 
 See `ABTR1976/monte_carlo_example.py` for a worked example.
 

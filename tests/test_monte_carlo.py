@@ -204,3 +204,29 @@ class TestShareCalculation:
         dist = coop.share_value_distribution(mc)
         assert dist.loc["A", "base"] == pytest.approx(mc.base_values["share_price"] * 500)
         assert dist.loc["A", "p5"] < dist.loc["A", "p95"]
+
+
+class TestBuffer:
+    def test_buffer_withheld_from_share_price(self):
+        coop = _coop(liquid_assets=1_000_000, share_price_buffer=2_000_000)
+        calc = coop.share_calculation(10_000_000)
+        assert calc.equity == 11_000_000 - 2_800_000          # buffer stays in equity
+        assert calc.share_equity == calc.equity - 2_000_000
+        assert calc.price_per_sqm == pytest.approx(calc.share_equity / 500)
+        assert coop.compute_share_price(10_000_000, buffer=0) == pytest.approx(calc.equity / 500)
+        assert calc.to_series()["Buffer (withheld)"] == 2_000_000
+
+    def test_buffer_in_monte_carlo(self):
+        coop = _coop(share_price_buffer=2_000_000)
+        mc = coop.run_monte_carlo(n_samples=20, seed=0)
+        s = mc.samples
+        assert np.allclose(s["share_equity"], s["equity"] - 2_000_000)
+        assert np.allclose(s["share_price"], s["share_equity"] / 500)
+        assert mc.base_values["share_price"] == pytest.approx(
+            coop.compute_share_price(coop.run_valuation()))
+        no_buffer = coop.run_monte_carlo(n_samples=20, seed=0, buffer=0)
+        assert np.allclose(no_buffer.samples["share_price"] - s["share_price"], 2_000_000 / 500)
+
+    def test_negative_buffer_rejected(self):
+        with pytest.raises(ValueError):
+            _coop(share_price_buffer=-1)

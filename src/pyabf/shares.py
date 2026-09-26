@@ -7,12 +7,18 @@ owner-occupied residential units (the andele):
     Assets       = Property value + Liquid assets + Other assets
     Liabilities  = Mortgage debt + Other liabilities
     Equity       = Assets − Liabilities
-    Share price  = Equity / Owner-occupied residential area   (DKK/m²)
+    Share equity = Equity − Buffer                            (DKK)
+    Share price  = Share equity / Owner-occupied residential area (DKK/m²)
     Share value  = Share price × unit area                     (DKK)
 
 The mortgage debt is taken either at market value (kursværdi, principal ×
 bond price) or at principal (nominal value); see
 :attr:`pyabf.cooperative.HousingCooperative.debt_basis`.
+
+The *buffer* is an amount of the equity the cooperative withholds when
+setting the share price (a safety margin against a lower future valuation
+or higher debt).  It stays in the cooperative's equity but is not
+distributed to the andele.
 
 Contains:
     DebtBasis        — "market" or "principal"
@@ -45,6 +51,7 @@ class ShareCalculation:
         owned_residential_area: Area of the owner-occupied residential
             units (m²), the denominator of the share price.
         debt_basis: How ``mortgage_debt`` was valued.
+        buffer: Equity withheld from the share price (DKK, >= 0).
     """
 
     property_value: float
@@ -54,6 +61,11 @@ class ShareCalculation:
     other_liabilities: float
     owned_residential_area: float
     debt_basis: DebtBasis = "market"
+    buffer: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.buffer < 0:
+            raise ValueError("buffer must be >= 0.")
 
     @property
     def total_assets(self) -> float:
@@ -71,11 +83,16 @@ class ShareCalculation:
         return self.total_assets - self.total_liabilities
 
     @property
+    def share_equity(self) -> float:
+        """Equity distributed to the andele: equity − buffer."""
+        return self.equity - self.buffer
+
+    @property
     def price_per_sqm(self) -> float:
         """Share price in DKK/m²; 0.0 when there is no owned area."""
         if self.owned_residential_area == 0:
             return 0.0
-        return self.equity / self.owned_residential_area
+        return self.share_equity / self.owned_residential_area
 
     def share_value(self, area: float) -> float:
         """Share value of a unit of ``area`` m² (DKK)."""
@@ -92,6 +109,8 @@ class ShareCalculation:
             "Other liabilities": self.other_liabilities,
             "Total liabilities": self.total_liabilities,
             "Equity": self.equity,
+            "Buffer (withheld)": self.buffer,
+            "Equity for share price": self.share_equity,
             "Owned residential area (m²)": self.owned_residential_area,
             "Share price (DKK/m²)": self.price_per_sqm,
         })
