@@ -10,12 +10,15 @@ Sources:
     - Loans 15, 16 and 17: docs/loan.ipynb.
 
 Placeholders — replace with the real figures:
-    - Units: one aggregated unit holding the whole residential area.  Use
-      ``forening.add_units_from_ois([...BFE...])`` or the real unit list
-      to get per-apartment share values.
+    - Units: two example andele (62 and 75 m², as in the scenario
+      analysis) and one aggregated unit for the rest of the residential
+      area.  Use ``forening.add_units_from_ois([...BFE...])`` or the real
+      unit list to get the share value of every andel.
     - base_rent_per_sqm / modernized_rent_per_sqm: only their difference
       (850 DKK/m², the rent uplift) is known from the valuation.
-    - other_assets / other_liabilities: from the scenario analysis.
+    - liquid_assets / other_liabilities: from the scenario analysis
+      (2.5M other assets, taken here as liquid holdings, and 0.5M other
+      liabilities).  Use the latest annual report's balance sheet.
 """
 
 from __future__ import annotations
@@ -74,15 +77,18 @@ def tr76_loans() -> list[Loan]:
 
 
 def build_tr76() -> HousingCooperative:
-    """A/B TR 1976 with loans, valuation and balance-sheet items."""
+    """A/B TR 1976 with units, loans, valuation and balance-sheet items."""
     return HousingCooperative(
         name="A/B TR 1976",
         units=[
-            CooperativeUnit("Andele i alt (pladsholder)",
-                            area=RESIDENTIAL_AREA, rooms=0),
+            CooperativeUnit("Eksempel-andel 62 m²", area=62, rooms=2),
+            CooperativeUnit("Eksempel-andel 75 m²", area=75, rooms=3),
+            CooperativeUnit("Øvrige andele (pladsholder)",
+                            area=RESIDENTIAL_AREA - 62 - 75, rooms=0),
         ],
         loans=tr76_loans(),
         valuation_assumptions=tr76_valuation_assumptions(),
-        other_assets=2_500_000,
+        liquid_assets=2_500_000,     # likvide beholdninger
         other_liabilities=500_000,
+        debt_basis="market",         # loans at kursværdi
     )

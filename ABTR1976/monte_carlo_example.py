@@ -6,9 +6,11 @@ Walks through the general cases:
     1. Default parameters on the valuation alone
     2. A chosen subset of parameters, default spreads
     3. Custom spreads ({path: std} and ParameterDistribution)
-    4. Through the Forening: property value, debt (bond prices) and
-       share price together
-    5. Which parameters drive the spread (input for a tornado chart)
+    4. The share price: the Forening's balance (property value + liquid
+       holdings − debt) per m² of andel, and the value of each andel
+    5. Through the Forening: the Monte Carlo of the property value, debt
+       (bond prices), share price and value per andel together
+    6. Which parameters drive the spread (input for a tornado chart)
 
 Defaults: 1000 samples; std 2.5 % of the value for amounts and 0.25
 percentage points for rates.
@@ -73,19 +75,24 @@ def main(forening: HousingCooperative | None = None, seed: int = 1976) -> None:
     print(mc.parameter_table())
     print(mc.summary(["total_value"]), "\n")
 
-    # 4. Through the Forening: valuation + loan bond prices -> share price
-    mc = forening.run_monte_carlo(seed=seed)
-    print("4) Forening: property value, debt and share price")
-    print(mc.summary(["total_value", "debt_market_value", "equity",
-                      "share_price"]), "\n")
-    for area in (62, 75):
-        p5, p50, p95 = mc.quantile([0.05, 0.5, 0.95], "share_price") * area
-        print(f"   {area} m² andel: median {p50:,.0f} DKK "
-              f"(90 %: {p5:,.0f} – {p95:,.0f})")
-    print()
+    # 4. From property value to share price (base case): the balance
+    #    and the value of each andel
+    calc = forening.share_calculation(base)
+    print("4) Andelsværdi, base case")
+    print(calc.to_series().to_string(float_format=lambda v: f"{v:,.0f}"), "\n")
+    print(forening.share_values(base), "\n")
 
-    # 5. What drives the spread
-    print("5) Contribution to the spread of the share price")
+    # 5. Monte Carlo through the Forening: valuation + loan bond prices,
+    #    then the same balance for every draw
+    mc = forening.run_monte_carlo(seed=seed)
+    print("5) Forening Monte Carlo: property value, debt and share price")
+    print(mc.summary(["total_value", "mortgage_debt", "equity",
+                      "share_price"]), "\n")
+    print("   Value per andel (DKK)")
+    print(forening.share_value_distribution(mc), "\n")
+
+    # 6. What drives the spread
+    print("6) Contribution to the spread of the share price")
     print(mc.sensitivity("share_price"), "\n")
 
     # All draws, one row each — the input for any plot

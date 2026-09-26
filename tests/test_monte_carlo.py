@@ -152,16 +152,55 @@ class TestCooperative:
         s = mc.samples
         assert {"loans.L1.bond_price", "loans.L2.bond_price", "share_price"} <= set(s.columns)
         debt = s["loans.L1.bond_price"] * 20_000 + s["loans.L2.bond_price"] * 10_000
-        assert np.allclose(s["debt_market_value"], debt)
+        assert np.allclose(s["mortgage_debt"], debt)
         assert np.allclose(s["share_price"], (s["total_value"] + 100_000 - debt) / 500)
         assert mc.base_values["share_price"] == pytest.approx(
             coop.compute_share_price(coop.run_valuation()))
         assert mc.parameter_table().loc["loans.L1.bond_price", "std"] == pytest.approx(0.025 * 90)
 
     def test_monte_carlo_fixed_loans(self):
-        mc = _coop().run_monte_carlo(n_samples=10, seed=0, loan_parameters=None)
-        assert np.allclose(mc.samples["debt_market_value"], 2_800_000)
+        mc = _coop().run_monte_carlo(n_samples=10, seed=0, loan_parameters=[])
+        assert np.allclose(mc.samples["mortgage_debt"], 2_800_000)
 
     def test_monte_carlo_rejects_irrelevant_loan_parameter(self):
         with pytest.raises(ValueError):
             _coop().run_monte_carlo(n_samples=2, loan_parameters=["interest_rate"])
+
+
+class TestShareCalculation:
+    def test_balance_with_liquid_assets(self):
+        coop = _coop(liquid_assets=300_000, other_assets=100_000, other_liabilities=50_000)
+        calc = coop.share_calculation(10_000_000)
+        assert calc.total_assets == 10_400_000
+        assert calc.mortgage_debt == 2_800_000
+        assert calc.equity == 10_400_000 - 2_850_000
+        assert calc.price_per_sqm == pytest.approx(calc.equity / 500)
+        assert calc.to_series()["Equity"] == calc.equity
+        assert coop.compute_share_price(10_000_000) == calc.price_per_sqm
+
+    def test_principal_debt_basis(self):
+        coop = _coop(debt_basis="principal")
+        assert coop.share_calculation(10_000_000).mortgage_debt == 3_000_000
+        mc = coop.run_monte_carlo(n_samples=10, seed=0)
+        assert not any(c.startswith("loans.") for c in mc.samples)
+        assert np.allclose(mc.samples["mortgage_debt"], 3_000_000)
+        with pytest.raises(ValueError):
+            coop.run_monte_carlo(n_samples=2, loan_parameters=["bond_price"])
+        with pytest.raises(ValueError):
+            _coop(debt_basis="nominal")
+
+    def test_share_values_per_andel(self):
+        coop = _coop(liquid_assets=1_000_000)
+        table = coop.share_values()
+        assert list(table.index) == ["A"]  # the rental unit has no andel
+        price = coop.compute_share_price(coop.run_valuation())
+        assert table.loc["A", "share_value"] == pytest.approx(price * 500)
+
+    def test_monte_carlo_includes_liquid_assets(self):
+        coop = _coop(liquid_assets=1_000_000)
+        mc = coop.run_monte_carlo(n_samples=50, seed=0)
+        s = mc.samples
+        assert np.allclose(s["equity"], s["total_value"] + 1_000_000 - s["mortgage_debt"])
+        dist = coop.share_value_distribution(mc)
+        assert dist.loc["A", "base"] == pytest.approx(mc.base_values["share_price"] * 500)
+        assert dist.loc["A", "p5"] < dist.loc["A", "p95"]

@@ -28,6 +28,7 @@ pytest
 | --- | --- |
 | `pyabf.cooperative` | `HousingCooperative`: the main entry point that ties everything together |
 | `pyabf.units` | `Unit`, `CooperativeUnit`, `CommercialUnit`, `Improvement` |
+| `pyabf.shares` | `ShareCalculation`: property value + liquid assets − debt → equity → share price per m² |
 | `pyabf.loan` | `Loan`: annuity loans with interest-only periods, contribution rate and bond price |
 | `pyabf.accounting` | `AccountEntry`, `AnnualReport`, `DEFAULT_NOTES` |
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
@@ -197,18 +198,38 @@ draws. Parameters are dotted paths into `ValuationAssumptions`.
 
 ```
 
-Store the assumptions on the cooperative to value it directly. Its
-`run_monte_carlo` also varies the loans' bond prices and returns the debt
-market value, equity and share price for every draw:
+### From property value to share price
+
+Store the valuation inputs and the balance-sheet items on the
+cooperative. The share price is the equity (property value + liquid
+assets + other assets − mortgage debt − other liabilities) per m² of
+owner-occupied residential area. The debt is taken at market value
+(`debt_basis="market"`, the default) or at principal
+(`debt_basis="principal"`).
 
 ```python
 >>> coop.valuation_assumptions = assumptions
->>> coop.other_assets = 500_000
+>>> coop.liquid_assets = 500_000          # likvide beholdninger
+>>> calc = coop.share_calculation(coop.run_valuation())
+>>> calc.equity == calc.property_value + 500_000 - 5_000_000 * 0.90
+True
+>>> list(coop.share_values().columns)     # one row per andel
+['area', 'price_per_sqm', 'share_value']
+
+```
+
+The cooperative's `run_monte_carlo` applies the same calculation to every
+draw, and also varies the loans' bond prices. `share_value_distribution`
+turns the sampled share price into the value of each andel:
+
+```python
 >>> mc = coop.run_monte_carlo(n_samples=200, seed=1)
->>> mc.base_values["share_price"] == coop.compute_share_price(coop.run_valuation())
+>>> mc.base_values["share_price"] == calc.price_per_sqm
 True
 >>> "loans.Loan 1.bond_price" in mc.samples
 True
+>>> list(coop.share_value_distribution(mc).columns)
+['area', 'base', 'mean', 'std', 'p5', 'p50', 'p95']
 
 ```
 
