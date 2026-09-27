@@ -40,6 +40,7 @@ from .valuation import (
     ParameterDistribution,
     MonteCarloResult,
     run_monte_carlo,
+    BudgetValuationMapping,
 )
 from .tax import compute_property_tax
 from .shares import ShareCalculation
@@ -93,6 +94,7 @@ __all__ = [
     "ParameterDistribution",
     "MonteCarloResult",
     "run_monte_carlo",
+    "BudgetValuationMapping",
     # Projects
     "ProjectPlan",
     # Tax

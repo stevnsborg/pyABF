@@ -35,7 +35,7 @@ pytest
 | `pyabf.accounting` | `AccountEntry`, `AnnualReport`, `DEFAULT_NOTES` |
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
 | `pyabf.tax` | `compute_property_tax`: grundskyld under the 2024+ transition rules |
-| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport` |
+| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport`, `BudgetValuationMapping` |
 | `pyabf.project` | `ProjectPlan`: a project budget paid monthly over its duration; a share of it is added to the valuation's improvements |
 | `pyabf.ois` | `OISClient`, `fetch_units`, `fetch_floors`: load a property's BBR units and floors (basements, roof floors) from OIS.dk by BFE number |
 
@@ -273,6 +273,39 @@ True
 ['area', 'base', 'mean', 'std', 'p5', 'p50', 'p95']
 
 ```
+
+### Valuation inputs from the budget
+
+Instead of typing in the operating costs and the commercial rent, they can
+be computed from a budget. A `BudgetValuationMapping` maps budget lines to
+`OperatingCostAssumptions` fields (any other target name becomes a line in
+`other`) and lists the income lines that make up the commercial rent.
+`basis` picks the budgeted amounts, the actuals, or the actuals
+extrapolated to a full year (`months_elapsed`). Parameters the mapping
+does not cover are kept, and keyword overrides win over the budget.
+
+```python
+>>> from pyabf import BudgetValuationMapping
+>>> shop = BudgetCategory("other_income", "Andre indtægter", CategoryType.INCOME)
+>>> shop.add_item(BudgetLineItem("shop_rent", "Erhvervsleje", budgeted=-250_000))
+>>> budget.add_category(shop)
+>>> coop.add_budget(budget)
+>>> mapping = BudgetValuationMapping(
+...     operating={"insurance": "insurance"},   # budget line → field
+...     commercial_rent=["shop_rent"],
+...     basis="budgeted",                        # or "actual" / "extrapolated"
+... )
+>>> from_budget = coop.valuation_assumptions_from_budget(
+...     "2025/2026", mapping, caretaker=180_000)  # explicit value wins
+>>> from_budget.total_operating_cost, from_budget.rent.total_commercial_rent
+(380000.0, 250000)
+>>> result = coop.run_valuation(from_budget)
+
+```
+
+The stored `valuation_assumptions` are not changed; store the result there
+to use it by default. `mapping.apply(assumptions, budget)` does the same
+without a cooperative.
 
 ### Plots
 
