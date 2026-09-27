@@ -17,6 +17,7 @@ Modules:
     cooperative — HousingCooperative (the main class)
     ois         — Load units from OIS.dk by BFE number
     project     — ProjectPlan (project budget paid monthly → improvements)
+    financing   — ProjectFinancing (loan / credit / liquid assets for a project)
 """
 
 from .units import Unit, CooperativeUnit, CommercialUnit, Improvement
@@ -46,6 +47,7 @@ from .tax import compute_property_tax
 from .shares import ShareCalculation
 from .cooperative import HousingCooperative
 from .project import ProjectPlan
+from .financing import ProjectFinancing
 from .ois import OISClient, OISUnit, OISFloor, OISError, fetch_units, fetch_floors
 from .budget import (
     BudgetLineItem,
@@ -97,6 +99,7 @@ __all__ = [
     "BudgetValuationMapping",
     # Projects
     "ProjectPlan",
+    "ProjectFinancing",
     # Tax
     "compute_property_tax",
     # Budget

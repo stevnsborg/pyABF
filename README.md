@@ -37,6 +37,7 @@ pytest
 | `pyabf.tax` | `compute_property_tax`: grundskyld under the 2024+ transition rules |
 | `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport`, `BudgetValuationMapping` |
 | `pyabf.project` | `ProjectPlan`: a project budget paid monthly over its duration; a share of it is added to the valuation's improvements |
+| `pyabf.financing` | `ProjectFinancing`: pay a project from a loan, a construction credit, liquid assets or a mix, with deposit interest; the credit is refinanced by a loan or paid from the bank at the end |
 | `pyabf.ois` | `OISClient`, `fetch_units`, `fetch_floors`: load a property's BBR units and floors (basements, roof floors) from OIS.dk by BFE number |
 
 All amounts are in DKK. Rates are fractions (`0.02` = 2 %).
@@ -208,6 +209,44 @@ the valuation's improvements.
 ```
 
 `payment_schedule()` gives the month-by-month payments.
+
+### Financing a project
+
+`ProjectFinancing` pays a project's monthly payments from a loan taken at
+the start (`loan_fraction`), a construction credit drawn month by month
+(`credit_fraction`) and liquid assets (the rest). The bank balance starts
+at `liquid_assets`, holds the loan's proceeds, pays the loan's payments
+and earns `deposit_rate`. At the end of the project the credit, including
+capitalised interest, is either refinanced by a loan
+(`credit_settlement="loan"`, on `settlement_loan` terms or else `loan`'s)
+or paid from the bank (`"liquid"`). Loans are raised at their bond price.
+
+```python
+>>> from pyabf import ProjectFinancing
+>>> fin = ProjectFinancing(
+...     plan,                                   # the 2.4M window project
+...     loan_fraction=0.5, credit_fraction=0.3, # 20 % from liquid assets
+...     loan=Loan("Windows loan", interest_rate=0.04, term_years=30,
+...               interest_only_years=2, bond_price=98),
+...     credit_interest_rate=0.06,
+...     liquid_assets=1_000_000, deposit_rate=0.015,
+...     credit_settlement="loan",
+... )
+>>> [loan.name for loan in fin.loans()]
+['Windows loan', 'Windows loan (credit)']
+>>> s = fin.summary()
+>>> round(s["financed_by_credit"]), round(s["credit_at_end"])
+(720000, 751432)
+>>> fin.shortfall                              # the bank never goes negative
+0.0
+>>> list(fin.annual_schedule().columns)[:4]
+['project_payment', 'credit_draw', 'paid_from_bank', 'credit_interest']
+
+```
+
+`schedule()` has the month-by-month flows and balances. `loans()` gives
+the new loans at their original principal (the credit's loan starts when
+the project ends), ready to add to `coop.loans`.
 
 ### Monte Carlo valuation
 
