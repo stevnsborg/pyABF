@@ -35,7 +35,9 @@ pytest
 | `pyabf.accounting` | `AccountEntry`, `AnnualReport`, `DEFAULT_NOTES` |
 | `pyabf.budget` | `Budget`, `BudgetTracker`, `AccountMapping`, balance-sheet CSV import |
 | `pyabf.tax` | `compute_property_tax`: grundskyld under the 2024+ transition rules |
-| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport` |
+| `pyabf.valuation` | `ValuationAssumptions`, `DCFModel`, `run_sensitivity`, `run_monte_carlo`, `ValuationReport`, `BudgetValuationMapping` |
+| `pyabf.project` | `ProjectPlan`: a project budget paid monthly over its duration; a share of it is added to the valuation's improvements |
+| `pyabf.financing` | `ProjectFinancing`: pay a project from a loan, a construction credit, liquid assets or a mix, with deposit interest; the credit is refinanced by a loan or paid from the bank at the end |
 | `pyabf.ois` | `OISClient`, `fetch_units`, `fetch_floors`: load a property's BBR units and floors (basements, roof floors) from OIS.dk by BFE number |
 
 All amounts are in DKK. Rates are fractions (`0.02` = 2 %).
@@ -176,6 +178,76 @@ True
 `ValuationReport(result, assumptions).to_text()` renders a full text report
 with the assumptions, NPV breakdown, cash-flow table and sensitivity grid.
 
+### Project plans
+
+A `ProjectPlan` has a budget and a duration in months. The cost is paid in
+equal monthly amounts from the start month. `improvement_fraction` is the
+share of the cost that counts as an improvement: `add_to_valuation` adds
+one `ImprovementAllowance` per calendar year (the amount paid that year) to
+the valuation's improvements.
+
+```python
+>>> from pyabf import ProjectPlan
+>>> plan = ProjectPlan("New windows", budget=2_400_000, duration_months=18,
+...                    start_year=2026, start_month=10,
+...                    improvement_fraction=0.30, yield_rate=0.05)
+>>> round(plan.monthly_payment), plan.improvement_value
+(133333, 720000.0)
+>>> plan.end_year, plan.end_month
+(2028, 3)
+>>> annual = plan.annual_payments()        # summed per calendar year
+>>> annual["months"].to_dict()
+{2026: 3, 2027: 12, 2028: 3}
+>>> annual["improvement"].round().to_dict()
+{2026: 120000.0, 2027: 480000.0, 2028: 120000.0}
+>>> plan.add_to_valuation(assumptions)
+>>> [imp.name for imp in assumptions.improvements]
+['New windows (2026)', 'New windows (2027)', 'New windows (2028)']
+>>> round(assumptions.total_improvement_allowance)   # 720,000 × 5 %
+36000
+
+```
+
+`payment_schedule()` gives the month-by-month payments.
+
+### Financing a project
+
+`ProjectFinancing` pays a project's monthly payments from a loan taken at
+the start (`loan_fraction`), a construction credit drawn month by month
+(`credit_fraction`) and liquid assets (the rest). The bank balance starts
+at `liquid_assets`, holds the loan's proceeds, pays the loan's payments
+and earns `deposit_rate`. At the end of the project the credit, including
+capitalised interest, is either refinanced by a loan
+(`credit_settlement="loan"`, on `settlement_loan` terms or else `loan`'s)
+or paid from the bank (`"liquid"`). Loans are raised at their bond price.
+
+```python
+>>> from pyabf import ProjectFinancing
+>>> fin = ProjectFinancing(
+...     plan,                                   # the 2.4M window project
+...     loan_fraction=0.5, credit_fraction=0.3, # 20 % from liquid assets
+...     loan=Loan("Windows loan", interest_rate=0.04, term_years=30,
+...               interest_only_years=2, bond_price=98),
+...     credit_interest_rate=0.06,
+...     liquid_assets=1_000_000, deposit_rate=0.015,
+...     credit_settlement="loan",
+... )
+>>> [loan.name for loan in fin.loans()]
+['Windows loan', 'Windows loan (credit)']
+>>> s = fin.summary()
+>>> round(s["financed_by_credit"]), round(s["credit_at_end"])
+(720000, 751432)
+>>> fin.shortfall                              # the bank never goes negative
+0.0
+>>> list(fin.annual_schedule().columns)[:4]
+['project_payment', 'credit_draw', 'paid_from_bank', 'credit_interest']
+
+```
+
+`schedule()` has the month-by-month flows and balances. `loans()` gives
+the new loans at their original principal (the credit's loan starts when
+the project ends), ready to add to `coop.loans`.
+
 ### Monte Carlo valuation
 
 `run_monte_carlo` draws the selected parameters from normal distributions
@@ -240,6 +312,39 @@ True
 ['area', 'base', 'mean', 'std', 'p5', 'p50', 'p95']
 
 ```
+
+### Valuation inputs from the budget
+
+Instead of typing in the operating costs and the commercial rent, they can
+be computed from a budget. A `BudgetValuationMapping` maps budget lines to
+`OperatingCostAssumptions` fields (any other target name becomes a line in
+`other`) and lists the income lines that make up the commercial rent.
+`basis` picks the budgeted amounts, the actuals, or the actuals
+extrapolated to a full year (`months_elapsed`). Parameters the mapping
+does not cover are kept, and keyword overrides win over the budget.
+
+```python
+>>> from pyabf import BudgetValuationMapping
+>>> shop = BudgetCategory("other_income", "Andre indtægter", CategoryType.INCOME)
+>>> shop.add_item(BudgetLineItem("shop_rent", "Erhvervsleje", budgeted=-250_000))
+>>> budget.add_category(shop)
+>>> coop.add_budget(budget)
+>>> mapping = BudgetValuationMapping(
+...     operating={"insurance": "insurance"},   # budget line → field
+...     commercial_rent=["shop_rent"],
+...     basis="budgeted",                        # or "actual" / "extrapolated"
+... )
+>>> from_budget = coop.valuation_assumptions_from_budget(
+...     "2025/2026", mapping, caretaker=180_000)  # explicit value wins
+>>> from_budget.total_operating_cost, from_budget.rent.total_commercial_rent
+(380000.0, 250000)
+>>> result = coop.run_valuation(from_budget)
+
+```
+
+The stored `valuation_assumptions` are not changed; store the result there
+to use it by default. `mapping.apply(assumptions, budget)` does the same
+without a cooperative.
 
 ### Plots
 

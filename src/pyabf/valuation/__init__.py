@@ -12,6 +12,7 @@ Modules:
     sensitivity  — Two-dimensional what-if analysis grid
     report       — Human-readable report generation
     monte_carlo  — Monte Carlo simulation of the valuation
+    budget_inputs — Operating costs and commercial rent from a Budget
 
 Quick start:
     >>> from pyabf.valuation import (
@@ -43,6 +44,7 @@ from .cash_flow import AnnualCashFlow, CashFlowProjection
 from .dcf_model import DCFModel, ValuationResult
 from .sensitivity import SensitivityGrid, run_sensitivity
 from .report import ValuationReport
+from .budget_inputs import BudgetValuationMapping, OPERATING_AMOUNT_FIELDS
 from .monte_carlo import (
     ParameterDistribution,
     MonteCarloResult,
@@ -80,6 +82,9 @@ __all__ = [
     "run_sensitivity",
     # Report
     "ValuationReport",
+    # Budget inputs
+    "BudgetValuationMapping",
+    "OPERATING_AMOUNT_FIELDS",
     # Monte Carlo
     "ParameterDistribution",
     "MonteCarloResult",

@@ -49,6 +49,7 @@ from .tax import compute_property_tax
 from .ois import OISClient, fetch_units
 from .shares import DEBT_BASES, DebtBasis, ShareCalculation
 from .valuation import (
+    BudgetValuationMapping,
     PropertyDescription,
     ValuationAssumptions,
     DCFModel,
@@ -600,6 +601,41 @@ class HousingCooperative:
                 "or set coop.valuation_assumptions."
             )
         return self.valuation_assumptions
+
+    def valuation_assumptions_from_budget(
+        self,
+        fiscal_year: str,
+        mapping: BudgetValuationMapping,
+        assumptions: ValuationAssumptions | None = None,
+        **operating_overrides: float | dict[str, float] | None,
+    ) -> ValuationAssumptions:
+        """Valuation inputs with parameters taken from a stored budget.
+
+        The parameters ``mapping`` covers (operating costs, commercial
+        rent) are computed from the budget; everything else is copied from
+        ``assumptions``. Neither the budget nor the stored assumptions are
+        changed: pass the result to :meth:`run_valuation` (or store it in
+        ``valuation_assumptions``).
+
+        Args:
+            fiscal_year: The budget to read (see :meth:`add_budget`).
+            mapping: Which budget lines feed which parameters.
+            assumptions: The inputs to start from. Defaults to
+                ``valuation_assumptions``.
+            **operating_overrides: Operating-cost fields to set explicitly;
+                they win over the budget.
+
+        Returns:
+            New ``ValuationAssumptions``.
+
+        Raises:
+            ValueError: If there is no budget for ``fiscal_year``.
+        """
+        budget = self.get_budget(fiscal_year)
+        if budget is None:
+            raise ValueError(f"{self.name} has no budget for {fiscal_year}.")
+        return mapping.apply(
+            self._resolve_assumptions(assumptions), budget, **operating_overrides)
 
     def run_valuation(
         self,
